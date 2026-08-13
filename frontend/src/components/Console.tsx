@@ -3,6 +3,7 @@ import { ThinkingOrb } from 'thinking-orbs'
 import type { OrbState } from './states'
 import { chatStream, hasKey, type ChatMessage } from '../lib/groq'
 import { speechSupported, useSpeech } from '../lib/speech'
+import { speak, stopSpeaking, ttsAvailable } from '../lib/tts'
 
 const orangeTint = {
   filter: 'sepia(1) saturate(4) hue-rotate(-15deg) brightness(1.15)',
@@ -30,7 +31,13 @@ export default function Console({ state, onOpenBrowser, onStateChange }: Props) 
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  const [voiceOn, setVoiceOn] = useState(true)
+  const [ttsOnline, setTtsOnline] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    ttsAvailable().then(setTtsOnline)
+  }, [])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -60,6 +67,10 @@ export default function Console({ state, onOpenBrowser, onStateChange }: Props) 
       for await (const chunk of chatStream(history)) {
         acc += chunk
         setMessages([...base, { role: 'jarvis', text: acc }])
+      }
+      if (voiceOn && ttsOnline && acc) {
+        onStateChange('composing')
+        await speak(acc)
       }
     } catch (err) {
       setMessages([...base, { role: 'jarvis', text: `Uplink error: ${err instanceof Error ? err.message : err}` }])
@@ -99,7 +110,20 @@ export default function Console({ state, onOpenBrowser, onStateChange }: Props) 
     <aside className="console cut">
       <div className="console-header">
         <span className="console-title">⚡ NEURAL INTERACTION CONSOLE</span>
-        <span className="console-status">{hasKey ? 'GROQ LPU ONLINE' : 'NO API KEY'}</span>
+        <span className="console-header-right">
+          <button
+            type="button"
+            className={`console-voice${voiceOn && ttsOnline ? ' on' : ''}`}
+            title={ttsOnline ? (voiceOn ? 'Voice output on' : 'Voice output muted') : 'Voice server offline'}
+            onClick={() => {
+              stopSpeaking()
+              setVoiceOn((v) => !v)
+            }}
+          >
+            {voiceOn && ttsOnline ? '🔊' : '🔇'}
+          </button>
+          <span className="console-status">{hasKey ? 'GROQ LPU ONLINE' : 'NO API KEY'}</span>
+        </span>
       </div>
       <div className="console-meta">
         <span className="console-meta-chip cut">

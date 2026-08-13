@@ -60,12 +60,15 @@ export function useSpeech({ onFinal, onEnd }: Options) {
       setInterim(interimText)
     }
     rec.onerror = (e) => {
+      if (e.error === 'no-speech' || e.error === 'aborted') return // benign: silence or manual stop
       setError(
         e.error === 'not-allowed'
           ? 'Microphone access denied — allow mic permission for this site.'
-          : e.error === 'network'
-            ? 'Speech service unreachable — voice input needs Chrome/Edge with internet.'
-            : `Speech error: ${e.error}`
+          : e.error === 'audio-capture'
+            ? 'No microphone found — check that a mic is connected and set as the Windows default input.'
+            : e.error === 'network'
+              ? 'Speech service unreachable — voice input needs Chrome/Edge with internet.'
+              : `Speech error: ${e.error}`
       )
     }
     rec.onend = () => {

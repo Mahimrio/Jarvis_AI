@@ -1,0 +1,4 @@
+pocket-tts
+fastapi
+uvicorn
+scipy
