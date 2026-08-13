@@ -281,11 +281,16 @@ canvas {
 
 .pedestal-glow {
   position: absolute;
-  bottom: 17%;
-  width: 300px;
-  height: 52px;
-  background: radial-gradient(ellipse, var(--ember-dim) 0%, rgba(255, 140, 46, 0.12) 45%, transparent 70%);
-  filter: blur(8px);
+  bottom: 15%;
+  width: 380px;
+  height: 72px;
+  background: radial-gradient(
+    ellipse,
+    rgba(255, 150, 55, 0.55) 0%,
+    rgba(255, 140, 46, 0.22) 42%,
+    transparent 72%
+  );
+  filter: blur(10px);
   will-change: transform, opacity;
 }
 

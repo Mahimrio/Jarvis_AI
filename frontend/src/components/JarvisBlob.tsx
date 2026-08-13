@@ -4,9 +4,27 @@ import * as THREE from 'three'
 import { STATES, type OrbState } from './states'
 
 const COUNT = 5000
+const RING_COUNT = 900
 
 // rotation speed per state, indexed like STATES
 const SPIN = [0.35, 0.05, 0.08, 0.1, 0.15, 0.2, 0.12, 0.06, 0.1]
+
+// scattered dust annulus around the blob
+function ringDistribution(count: number) {
+  const positions = new Float32Array(count * 3)
+  const sizes = new Float32Array(count)
+  const phases = new Float32Array(count)
+  for (let i = 0; i < count; i++) {
+    const r = 1.55 + Math.pow(Math.random(), 1.6) * 1.25
+    const ang = Math.random() * Math.PI * 2
+    positions[i * 3] = Math.cos(ang) * r
+    positions[i * 3 + 1] = (Math.random() - 0.5) * 0.16 * (r - 1.2)
+    positions[i * 3 + 2] = Math.sin(ang) * r
+    sizes[i] = 0.8 + Math.random() * 1.8
+    phases[i] = Math.random()
+  }
+  return { positions, sizes, phases }
+}
 
 // Evenly dot the sphere surface (golden-angle spiral), like thinking-orbs' dotted globe
 function fibonacciSphere(count: number): Float32Array {
@@ -82,21 +100,11 @@ const vertexShader = /* glsl */ `
       // breathing: one deep slow pulse
       breath = 1.0 + 0.13 * sin(t * 1.4);
     } else {
-      // shaping: sphere -> cube -> pyramid -> sphere
+      // shaping: sphere morphs to a cube and back
       vec3 d = normalize(p);
       vec3 cubep = d / max(max(abs(d.x), abs(d.y)), abs(d.z)) * 0.82;
-      // radial cast onto a square pyramid (4 slanted planes + base)
-      float m = max(-d.y / 0.5, dot(d, vec3(2.0, 1.0, 0.0)) / 0.9);
-      m = max(m, dot(d, vec3(-2.0, 1.0, 0.0)) / 0.9);
-      m = max(m, dot(d, vec3(0.0, 1.0, 2.0)) / 0.9);
-      m = max(m, dot(d, vec3(0.0, 1.0, -2.0)) / 0.9);
-      vec3 pyrp = d / m * 0.85;
-
-      float cyc = mod(t * 0.45, 3.0);
-      float f = smoothstep(0.25, 0.75, fract(cyc));
-      if (cyc < 1.0) pos = mix(pos, cubep, f);
-      else if (cyc < 2.0) pos = mix(cubep, pyrp, f);
-      else pos = mix(pyrp, pos, f);
+      float m = smoothstep(0.25, 0.75, 0.5 + 0.5 * sin(t * 0.9));
+      pos = mix(pos, cubep, m);
     }
   }
 
@@ -142,6 +150,55 @@ const fragmentShader = /* glsl */ `
   }
 `
 
+const ringVertexShader = /* glsl */ `
+  uniform float uTime;
+  attribute float aSize;
+  attribute float aPhase;
+  varying float vTwinkle;
+
+  void main() {
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+    gl_PointSize = clamp(aSize * (150.0 / -mvPosition.z), 0.5, 4.0);
+    vTwinkle = 0.35 + 0.65 * pow(0.5 + 0.5 * sin(uTime * 1.4 + aPhase * 6.2831), 1.5);
+  }
+`
+
+const ringFragmentShader = /* glsl */ `
+  varying float vTwinkle;
+
+  void main() {
+    float d = length(gl_PointCoord - 0.5);
+    float mask = smoothstep(0.5, 0.22, d);
+    if (mask < 0.01) discard;
+    vec3 ember = vec3(1.0, 0.62, 0.3);
+    gl_FragColor = vec4(ember * (0.5 + vTwinkle * 0.7), mask * vTwinkle * 0.55);
+  }
+`
+
+const coreVertexShader = /* glsl */ `
+  varying float vFacing;
+
+  void main() {
+    vec3 n = normalize(normalMatrix * normal);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vFacing = abs(dot(n, normalize(-mvPosition.xyz)));
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`
+
+const coreFragmentShader = /* glsl */ `
+  uniform float uIntensity;
+  varying float vFacing;
+
+  void main() {
+    // hottest at the center, fading to nothing at the rim
+    float f = pow(vFacing, 2.4);
+    vec3 hot = mix(vec3(1.0, 0.55, 0.2), vec3(1.0, 0.85, 0.6), f);
+    gl_FragColor = vec4(hot * f * uIntensity, f * 0.6 * uIntensity);
+  }
+`
+
 export default function JarvisBlob({
   state,
   shadowRef,
@@ -151,6 +208,11 @@ export default function JarvisBlob({
 }) {
   const pointsRef = useRef<THREE.Points>(null)
   const materialRef = useRef<THREE.ShaderMaterial>(null)
+  const groupRef = useRef<THREE.Group>(null)
+  const ringRef = useRef<THREE.Points>(null)
+  const ringMatRef = useRef<THREE.ShaderMaterial>(null)
+  const coreRef = useRef<THREE.Mesh>(null)
+  const coreMatRef = useRef<THREE.ShaderMaterial>(null)
   const pointer = useRef({ x: 0, y: 0 })
   const stateIndex = STATES.indexOf(state)
   const trans = useRef({ from: stateIndex, to: stateIndex, blend: 1 })
@@ -167,6 +229,8 @@ export default function JarvisBlob({
     return { positions: fibonacciSphere(COUNT), phases }
   }, [])
 
+  const ring = useMemo(() => ringDistribution(RING_COUNT), [])
+
   useFrame((frame, delta) => {
     const points = pointsRef.current
     if (!points) return
@@ -176,11 +240,22 @@ export default function JarvisBlob({
     const ease = tr.blend * tr.blend * (3 - 2 * tr.blend)
     points.rotation.y += delta * THREE.MathUtils.lerp(SPIN[tr.from], SPIN[tr.to], ease)
 
-    // subtle parallax toward the mouse
+    // subtle parallax toward the mouse (whole assembly tilts)
     pointer.current.x = THREE.MathUtils.lerp(pointer.current.x, frame.pointer.x, 0.05)
     pointer.current.y = THREE.MathUtils.lerp(pointer.current.y, frame.pointer.y, 0.05)
-    points.rotation.x = -pointer.current.y * 0.25
-    points.rotation.z = pointer.current.x * 0.15
+    if (groupRef.current) {
+      groupRef.current.rotation.x = -pointer.current.y * 0.25
+      groupRef.current.rotation.z = pointer.current.x * 0.15
+    }
+
+    // dust ring counter-rotates slowly with a gentle wobble
+    if (ringRef.current) {
+      ringRef.current.rotation.y -= delta * 0.045
+      ringRef.current.rotation.x = 0.35 + Math.sin(frame.clock.elapsedTime * 0.2) * 0.04
+    }
+    if (ringMatRef.current) {
+      ringMatRef.current.uniforms.uTime.value = frame.clock.elapsedTime
+    }
 
     if (materialRef.current) {
       materialRef.current.uniforms.uTime.value = frame.clock.elapsedTime
@@ -206,26 +281,66 @@ export default function JarvisBlob({
       shadowRef.current.style.transform =
         `translateX(${(-pointer.current.x * 46).toFixed(1)}px) ` +
         `scale(${(breath + spread).toFixed(3)}, ${breath.toFixed(3)})`
-      shadowRef.current.style.opacity = (0.55 + (breath - 1) * 2.2).toFixed(3)
+      shadowRef.current.style.opacity = (0.85 + (breath - 1) * 2.6).toFixed(3)
+
+      // core pulses with the same breath, amplified
+      if (coreRef.current) {
+        coreRef.current.scale.setScalar(1 + (breath - 1) * 2.2)
+      }
+      if (coreMatRef.current) {
+        coreMatRef.current.uniforms.uIntensity.value = 0.85 + (breath - 1) * 4.0
+      }
     }
   })
 
   return (
-    <points ref={pointsRef}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-        <bufferAttribute attach="attributes-aPhase" args={[phases, 1]} />
-      </bufferGeometry>
-      <shaderMaterial
-        key={vertexShader + fragmentShader}
-        ref={materialRef}
-        vertexShader={vertexShader}
-        fragmentShader={fragmentShader}
-        uniforms={{ uTime: { value: 0 }, uStateFrom: { value: 0 }, uStateTo: { value: 0 }, uBlend: { value: 1 } }}
-        transparent
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
-      />
-    </points>
+    <group ref={groupRef}>
+      <points ref={pointsRef}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+          <bufferAttribute attach="attributes-aPhase" args={[phases, 1]} />
+        </bufferGeometry>
+        <shaderMaterial
+          key={vertexShader + fragmentShader}
+          ref={materialRef}
+          vertexShader={vertexShader}
+          fragmentShader={fragmentShader}
+          uniforms={{ uTime: { value: 0 }, uStateFrom: { value: 0 }, uStateTo: { value: 0 }, uBlend: { value: 1 } }}
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </points>
+      <points ref={ringRef} rotation={[0.35, 0, -0.15]}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[ring.positions, 3]} />
+          <bufferAttribute attach="attributes-aSize" args={[ring.sizes, 1]} />
+          <bufferAttribute attach="attributes-aPhase" args={[ring.phases, 1]} />
+        </bufferGeometry>
+        <shaderMaterial
+          key={ringVertexShader + ringFragmentShader}
+          ref={ringMatRef}
+          vertexShader={ringVertexShader}
+          fragmentShader={ringFragmentShader}
+          uniforms={{ uTime: { value: 0 } }}
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </points>
+      <mesh ref={coreRef}>
+        <sphereGeometry args={[0.5, 48, 48]} />
+        <shaderMaterial
+          key={coreVertexShader + coreFragmentShader}
+          ref={coreMatRef}
+          vertexShader={coreVertexShader}
+          fragmentShader={coreFragmentShader}
+          uniforms={{ uIntensity: { value: 0.85 } }}
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+    </group>
   )
 }
