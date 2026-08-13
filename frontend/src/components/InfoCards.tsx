@@ -17,7 +17,7 @@ export default function InfoCards() {
   let h = now.getHours()
   const ampm = h >= 12 ? 'PM' : 'AM'
   h = h % 12 || 12
-  const time = `${h}:${String(now.getMinutes()).padStart(2, '0')}`
+  const mins = String(now.getMinutes()).padStart(2, '0')
   const day = now.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
   const date = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()
 
@@ -25,7 +25,9 @@ export default function InfoCards() {
     <div className="info-cards">
       <div className="card cut">
         <div className="card-big">
-          {time}
+          {h}
+          <span className="blink-sep">:</span>
+          {mins}
           <span className="card-unit">{ampm}</span>
         </div>
         <div className="card-sub">{day}</div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { OrbState } from './states'
+import { STATES, type OrbState } from './states'
 
 function useFps() {
   const [fps, setFps] = useState(60)
@@ -92,14 +92,29 @@ function useOnline() {
 interface Props {
   state: OrbState
   onToggleBrowser: () => void
+  onSelectState: (s: OrbState) => void
 }
 
-export default function HudBar({ state, onToggleBrowser }: Props) {
+export default function HudBar({ state, onToggleBrowser, onSelectState }: Props) {
   const fps = useFps()
   const latency = useLatency()
   const uptime = useUptime()
   const ram = useRam()
   const online = useOnline()
+  const [protocolOpen, setProtocolOpen] = useState(false)
+  const [protocolClosing, setProtocolClosing] = useState(false)
+
+  const toggleProtocol = () => {
+    if (protocolOpen && !protocolClosing) {
+      setProtocolClosing(true)
+      setTimeout(() => {
+        setProtocolOpen(false)
+        setProtocolClosing(false)
+      }, 240)
+    } else if (!protocolOpen) {
+      setProtocolOpen(true)
+    }
+  }
 
   return (
     <header className="hud-top">
@@ -129,9 +144,40 @@ export default function HudBar({ state, onToggleBrowser }: Props) {
           <em>NETWORK</em>
           {online ? `ONLINE${latency === null ? '' : ` ${latency}ms`}` : 'OFFLINE'}
         </span>
-        <span className="hud-chip cut hud-chip-state">
-          <em>PROTOCOL</em>● {state.toUpperCase()}
-        </span>
+        <div className="protocol-wrap">
+          <button
+            type="button"
+            className={`hud-chip cut hud-chip-state${protocolOpen ? ' open' : ''}`}
+            onClick={toggleProtocol}
+            title="Protocol states"
+          >
+            <em>PROTOCOL ▾</em>
+            <span>
+              <span className="pulse-dot">●</span> {state.toUpperCase()}
+            </span>
+          </button>
+          {protocolOpen && (
+            <div className={`protocol-drop${protocolClosing ? ' closing' : ''}`}>
+              <div className="protocol-drop-label">SELECT PROTOCOL</div>
+              <div className="protocol-drop-grid">
+                {STATES.map((s, i) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className={`protocol-chip${s === state ? ' active' : ''}`}
+                    style={{ animationDelay: `${60 + i * 26}ms` }}
+                    onClick={() => {
+                      onSelectState(s)
+                      toggleProtocol()
+                    }}
+                  >
+                    ● {s.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         <span className="hud-chip cut hud-uptime">
           <em>UPTIME</em>
           {uptime}

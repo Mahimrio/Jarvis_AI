@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
+import gsap from 'gsap'
 import JarvisBlob from './components/JarvisBlob'
 import HudBar from './components/HudBar'
-import ProtocolBar from './components/ProtocolBar'
 import Console from './components/Console'
 import BrowserWindow, { type Anchor } from './components/BrowserWindow'
 import Sidebar from './components/Sidebar'
@@ -28,7 +28,17 @@ function resolveUrl(args: Record<string, unknown>): string {
 }
 
 export default function App() {
-  const [state, setState] = useState<OrbState>('breathing')
+  const [state, setStateRaw] = useState<OrbState>('breathing')
+  const stateNonce = useRef(0)
+  const [, forceTick] = useState(0)
+
+  // setting a state (even the same one) resets the idle timer
+  const setState = (s: OrbState) => {
+    stateNonce.current++
+    setStateRaw(s)
+    forceTick((n) => n + 1)
+  }
+
   const [browser, setBrowser] = useState<{ open: boolean; url: string; position: Anchor }>({
     open: false,
     url: HOME,
@@ -40,9 +50,22 @@ export default function App() {
   // failsafe: whatever happens, the core always drifts home to breathing
   useEffect(() => {
     if (state === 'breathing') return
-    const id = setTimeout(() => setState('breathing'), 12000)
+    const id = setTimeout(() => setStateRaw('breathing'), 12000)
     return () => clearTimeout(id)
-  }, [state])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, stateNonce.current])
+
+  // boot sequence: HUD assembles on first load
+  useEffect(() => {
+    const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
+    tl.from('.hud-top', { y: -64, opacity: 0, duration: 0.6 })
+      .from('.sidebar', { x: -72, opacity: 0, duration: 0.5 }, '-=0.32')
+      .from('.info-cards .card', { y: 28, opacity: 0, stagger: 0.1, duration: 0.45 }, '-=0.25')
+    // revert (not kill) so StrictMode's double-run leaves no stuck inline styles
+    return () => {
+      tl.revert()
+    }
+  }, [])
 
   const executeUICommand = (name: string, args: Record<string, unknown>): string => {
     switch (name) {
@@ -88,6 +111,7 @@ export default function App() {
       <HudBar
         state={state}
         onToggleBrowser={() => setBrowser((b) => ({ ...b, open: !b.open }))}
+        onSelectState={setState}
       />
       <Sidebar
         browserOpen={browser.open}
@@ -96,13 +120,18 @@ export default function App() {
         onToggleConsole={() => setConsoleOpen((v) => !v)}
       />
       <InfoCards />
-      {consoleOpen && (
+      {consoleOpen ? (
         <Console
           state={state}
-          onOpenBrowser={(url) => setBrowser({ open: true, url })}
+          onOpenBrowser={(url) => setBrowser({ open: true, url, position: 'center' })}
           onStateChange={setState}
           executeUICommand={executeUICommand}
+          onCollapse={() => setConsoleOpen(false)}
         />
+      ) : (
+        <button type="button" className="console-tab" onClick={() => setConsoleOpen(true)}>
+          ❮ NEURAL LINK
+        </button>
       )}
       {browser.open && (
         <BrowserWindow
@@ -111,7 +140,6 @@ export default function App() {
           onClose={() => setBrowser((b) => ({ ...b, open: false }))}
         />
       )}
-      <ProtocolBar state={state} onSelect={setState} />
     </div>
   )
 }

@@ -53,6 +53,26 @@ canvas {
   background-size: 48px 48px, 48px 48px, cover;
 }
 
+/* slow ambient scanline drifting down the stage */
+.stage::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -160px;
+  width: 100%;
+  height: 140px;
+  background: linear-gradient(180deg, transparent, rgba(255, 140, 46, 0.045), transparent);
+  animation: scan-sweep 11s linear infinite;
+  pointer-events: none;
+  z-index: 4;
+}
+
+@keyframes scan-sweep {
+  to {
+    transform: translateY(calc(100vh + 320px));
+  }
+}
+
 .stage-canvas {
   position: absolute !important;
   inset: 0;
@@ -72,6 +92,31 @@ canvas {
   background: linear-gradient(rgba(8, 6, 4, 0.9), rgba(8, 6, 4, 0.6));
   border-bottom: 1px solid var(--line);
   z-index: 20;
+}
+
+/* travelling highlight along the bar's bottom edge */
+.hud-top::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--ember) 50%, transparent 100%);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: edge-run 7s ease-in-out infinite;
+  opacity: 0.7;
+}
+
+@keyframes edge-run {
+  0%,
+  100% {
+    background-position: -40% 0;
+  }
+  50% {
+    background-position: 140% 0;
+  }
 }
 
 .hud-left {
@@ -114,14 +159,20 @@ canvas {
 .hud-chip {
   border: 1px solid var(--line);
   color: var(--ember-soft);
+  font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 1.5px;
-  padding: 5px 12px;
+  padding: 0 12px;
+  height: 38px;
+  box-sizing: border-box;
   background: var(--ember-faint);
   display: inline-flex;
   flex-direction: column;
-  gap: 1px;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 2px;
   line-height: 1.2;
+  text-align: left;
 }
 
 .hud-chip em {
@@ -129,6 +180,18 @@ canvas {
   color: var(--text-dim);
   font-size: 7px;
   letter-spacing: 2px;
+  line-height: 1;
+}
+
+.hud-chip-state span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1;
+}
+
+.pulse-dot {
+  line-height: 1;
 }
 
 .hud-chip-state {
@@ -163,50 +226,159 @@ canvas {
   box-shadow: 0 0 14px var(--ember-dim);
 }
 
-/* ---- protocol bar ---- */
-.protocol-bar {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 44px;
+/* ---- protocol dropdown ---- */
+.protocol-wrap {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: linear-gradient(rgba(8, 6, 4, 0.6), rgba(8, 6, 4, 0.9));
-  border-top: 1px solid var(--line);
-  z-index: 20;
 }
 
-.protocol-label {
+.protocol-drop {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  background: rgba(12, 9, 6, 0.96);
+  border: 1px solid var(--ember-dim);
+  border-radius: 8px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.65), 0 0 22px var(--ember-faint);
+  transform-origin: top center;
+  animation: drop-in 0.28s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  z-index: 25;
+}
+
+.protocol-drop.closing {
+  animation: drop-out 0.24s ease both;
+  pointer-events: none;
+}
+
+/* caret pointing back at the chip */
+.protocol-drop::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  margin-left: -5px;
+  width: 10px;
+  height: 10px;
+  background: rgba(12, 9, 6, 0.96);
+  border-left: 1px solid var(--ember-dim);
+  border-top: 1px solid var(--ember-dim);
+  transform: rotate(45deg);
+}
+
+.protocol-drop-label {
+  padding: 10px 14px 6px;
   color: var(--text-dim);
-  font-size: 10px;
-  letter-spacing: 2px;
-  margin-right: 8px;
+  font-size: 7.5px;
+  letter-spacing: 3px;
+  border-bottom: 1px solid var(--line);
+}
+
+.protocol-drop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 10px;
+}
+
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -12px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@keyframes drop-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -12px) scale(0.94);
+  }
+}
+
+.protocol-drop-grid .protocol-chip {
+  animation: chip-fade-in 0.3s ease both;
+}
+
+@keyframes chip-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+}
+
+.hud-chip-state {
+  cursor: pointer;
+  font-family: var(--mono);
+  transition: box-shadow 0.2s;
+}
+
+.hud-chip-state:hover,
+.hud-chip-state.open {
+  box-shadow: 0 0 12px var(--ember-faint);
 }
 
 .protocol-chip {
   font-family: var(--mono);
   font-size: 9px;
   letter-spacing: 1.5px;
-  padding: 4px 10px;
-  border-radius: 20px;
+  padding: 6px 10px;
+  border-radius: 4px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
+  text-align: left;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
 
 .protocol-chip:hover {
   color: var(--ember-soft);
+  background: var(--ember-faint);
 }
 
 .protocol-chip.active {
   color: var(--ember);
   border-color: var(--ember);
-  box-shadow: 0 0 10px var(--ember-dim);
+  animation: chip-glow 2.2s ease-in-out infinite;
+}
+
+@keyframes chip-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 6px var(--ember-faint);
+  }
+  50% {
+    box-shadow: 0 0 16px var(--ember-dim);
+  }
+}
+
+.pulse-dot {
+  display: inline-block;
+  animation: dot-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.blink-sep {
+  animation: dot-pulse 2s steps(1) infinite;
 }
 
 /* ---- sidebar ---- */
@@ -214,7 +386,7 @@ canvas {
   position: absolute;
   left: 0;
   top: 56px;
-  bottom: 44px;
+  bottom: 0;
   width: 68px;
   display: flex;
   flex-direction: column;
@@ -298,18 +470,50 @@ canvas {
 .info-cards {
   position: absolute;
   left: 84px;
-  bottom: 60px;
+  bottom: 20px;
   display: flex;
   gap: 12px;
   z-index: 15;
 }
 
 .card {
+  position: relative;
   min-width: 130px;
   padding: 14px 18px;
   background: var(--panel);
   border: 1px solid var(--line);
   backdrop-filter: blur(6px);
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.card:hover {
+  border-color: var(--ember-dim);
+  box-shadow: 0 0 18px var(--ember-faint);
+}
+
+/* ember corner accent hugging the cut corner */
+.card::before,
+.console::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10px;
+  width: 24px;
+  height: 2px;
+  background: var(--ember);
+  opacity: 0.65;
+}
+
+.card::after,
+.console::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 0;
+  width: 2px;
+  height: 24px;
+  background: var(--ember);
+  opacity: 0.65;
 }
 
 .card-big {
@@ -359,7 +563,7 @@ canvas {
   position: absolute;
   right: 16px;
   top: 72px;
-  bottom: 60px;
+  bottom: 20px;
   width: 350px;
   display: flex;
   flex-direction: column;
@@ -371,6 +575,39 @@ canvas {
   overflow: hidden;
 }
 
+/* slim tab shown when console is collapsed */
+.console-tab {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  padding: 16px 7px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 3px;
+  background: var(--panel);
+  border: 1px solid var(--ember-dim);
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  color: var(--ember);
+  cursor: pointer;
+  z-index: 15;
+  animation: tab-in 0.35s ease both;
+  transition: box-shadow 0.2s, padding-right 0.2s;
+}
+
+.console-tab:hover {
+  box-shadow: 0 0 16px var(--ember-dim);
+}
+
+@keyframes tab-in {
+  from {
+    transform: translateY(-50%) translateX(24px);
+    opacity: 0;
+  }
+}
+
 .console-header {
   display: flex;
   align-items: center;
@@ -380,15 +617,73 @@ canvas {
 }
 
 .console-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--ember);
   font-size: 10px;
-  letter-spacing: 2px;
+  letter-spacing: 3px;
+  font-weight: 700;
 }
 
-.console-status {
+.console-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5a3a20;
+  box-shadow: none;
+}
+
+.console-led.on {
+  background: var(--ember);
+  animation: led-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes led-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 3px var(--ember-dim);
+  }
+  50% {
+    box-shadow: 0 0 10px var(--ember);
+  }
+}
+
+.console-collapse {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.console-collapse:hover {
+  color: var(--ember);
+  border-color: var(--ember-dim);
+}
+
+.console-meta-line {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
   color: var(--text-dim);
   font-size: 8px;
-  letter-spacing: 1.5px;
+  letter-spacing: 1.8px;
+}
+
+.console-meta-line em {
+  font-style: normal;
+}
+
+.console-meta-line em.live {
+  color: var(--ember);
+  animation: dot-pulse 1s ease-in-out infinite;
 }
 
 .console-header-right {
@@ -398,17 +693,26 @@ canvas {
 }
 
 .console-voice {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
   background: transparent;
   border: 1px solid var(--line);
+  border-radius: 4px;
   color: var(--text-dim);
-  font-size: 11px;
-  padding: 2px 6px;
   cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.console-voice:hover {
+  border-color: var(--ember-dim);
 }
 
 .console-voice.on {
   color: var(--ember);
   border-color: var(--ember-dim);
+  box-shadow: 0 0 8px var(--ember-faint);
 }
 
 .console-meta {
@@ -485,6 +789,42 @@ canvas {
   gap: 8px;
   font-size: 11.5px;
   line-height: 1.5;
+  animation: msg-in 0.35s ease both;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.typing-dots span {
+  display: inline-block;
+  font-size: 7px;
+  margin-right: 3px;
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
 }
 
 .console-msg p {
@@ -495,8 +835,9 @@ canvas {
 
 .console-msg.jarvis p {
   color: #ffd9ae;
-  background: var(--ember-faint);
-  border: 1px solid var(--line);
+  background: rgba(255, 140, 46, 0.05);
+  border-left: 2px solid var(--ember-dim);
+  border-radius: 0 8px 8px 0;
 }
 
 .console-msg.user {
@@ -550,6 +891,20 @@ canvas {
 .console-mic:hover,
 .console-send:hover {
   box-shadow: 0 0 10px var(--ember-dim);
+}
+
+.console-mic:active,
+.console-send:active,
+.hud-btn:active,
+.protocol-chip:active,
+.side-btn:active {
+  transform: translateY(1px);
+}
+
+.console-send.ready {
+  background: var(--ember);
+  color: #140b04;
+  animation: chip-glow 1.6s ease-in-out infinite;
 }
 
 .console-mic.listening {

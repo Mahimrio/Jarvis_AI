@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
+import gsap from 'gsap'
 import type { OrbState } from './states'
 import { runChat, hasKey, type ChatMessage, type ToolExecutor } from '../lib/groq'
 import { speechSupported, useSpeech } from '../lib/speech'
@@ -7,6 +8,33 @@ import { speak, stopSpeaking, ttsAvailable } from '../lib/tts'
 
 const orangeTint = {
   filter: 'sepia(1) saturate(4) hue-rotate(-15deg) brightness(1.15)',
+}
+
+function SpeakerIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 5 6 9H2v6h4l5 4z" fill="currentColor" stroke="none" />
+      {muted ? (
+        <>
+          <line x1="16" y1="9" x2="22" y2="15" />
+          <line x1="22" y1="9" x2="16" y2="15" />
+        </>
+      ) : (
+        <>
+          <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+          <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+        </>
+      )}
+    </svg>
+  )
+}
+
+function ChevronIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
 }
 
 interface Message {
@@ -19,9 +47,10 @@ interface Props {
   onOpenBrowser: (url: string) => void
   onStateChange: (s: OrbState) => void
   executeUICommand: ToolExecutor
+  onCollapse: () => void
 }
 
-export default function Console({ state, onOpenBrowser, onStateChange, executeUICommand }: Props) {
+export default function Console({ state, onOpenBrowser, onStateChange, executeUICommand, onCollapse }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'jarvis',
@@ -35,6 +64,24 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
   const [voiceOn, setVoiceOn] = useState(true)
   const [ttsOnline, setTtsOnline] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const tween = gsap.from(rootRef.current, { x: 72, opacity: 0, duration: 0.5, ease: 'power3.out' })
+    return () => {
+      tween.revert()
+    }
+  }, [])
+
+  const collapse = () => {
+    gsap.to(rootRef.current, {
+      x: '112%',
+      opacity: 0.4,
+      duration: 0.4,
+      ease: 'power3.in',
+      onComplete: onCollapse,
+    })
+  }
 
   useEffect(() => {
     ttsAvailable().then(setTtsOnline)
@@ -112,9 +159,12 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
   }
 
   return (
-    <aside className="console cut">
+    <aside className="console cut" ref={rootRef}>
       <div className="console-header">
-        <span className="console-title">⚡ NEURAL INTERACTION CONSOLE</span>
+        <span className="console-title">
+          <span className={`console-led${hasKey ? ' on' : ''}`} />
+          NEURAL LINK
+        </span>
         <span className="console-header-right">
           <button
             type="button"
@@ -125,21 +175,17 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
               setVoiceOn((v) => !v)
             }}
           >
-            {voiceOn && ttsOnline ? '🔊' : '🔇'}
+            <SpeakerIcon muted={!(voiceOn && ttsOnline)} />
           </button>
-          <span className="console-status">{hasKey ? 'GROQ LPU ONLINE' : 'NO API KEY'}</span>
+          <button type="button" className="console-collapse" title="Collapse console" onClick={collapse}>
+            <ChevronIcon />
+          </button>
         </span>
       </div>
-      <div className="console-meta">
-        <span className="console-meta-chip cut">
-          <em>MODEL</em>LLAMA 3.3
-        </span>
-        <span className="console-meta-chip cut">
-          <em>MODE</em>STREAM
-        </span>
-        <span className="console-meta-chip cut">
-          <em>RESPONSE</em>
-          {busy ? 'STREAMING' : 'LIVE'}
+      <div className="console-meta-line">
+        <span>{hasKey ? 'GROQ LPU · ONLINE' : 'NO API KEY'}</span>
+        <span>
+          LLAMA 3.3 · STREAM · <em className={busy ? 'live' : ''}>{busy ? 'STREAMING' : 'IDLE'}</em>
         </span>
       </div>
       <div className="console-chips">
@@ -171,7 +217,15 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
                 <ThinkingOrb state={state} size={20} theme="dark" style={orangeTint} />
               </span>
             )}
-            <p>{m.text}</p>
+            {m.text === '…' ? (
+              <p className="typing-dots" aria-label="Jarvis is thinking">
+                <span>●</span>
+                <span>●</span>
+                <span>●</span>
+              </p>
+            ) : (
+              <p>{m.text}</p>
+            )}
           </div>
         ))}
       </div>
@@ -190,10 +244,20 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
           value={listening && interim ? interim : input}
           disabled={busy}
           readOnly={listening}
-          onChange={(e) => setInput(e.target.value)}
+          onFocus={() => !listening && onStateChange('composing')}
+          onBlur={() => !busy && !listening && onStateChange('breathing')}
+          onChange={(e) => {
+            setInput(e.target.value)
+            onStateChange('composing')
+          }}
           onKeyDown={(e) => e.key === 'Enter' && send()}
         />
-        <button type="button" className="console-send" onClick={() => send()} disabled={busy}>
+        <button
+          type="button"
+          className={`console-send${input.trim() && !busy ? ' ready' : ''}`}
+          onClick={() => send()}
+          disabled={busy}
+        >
           ➤
         </button>
       </div>
