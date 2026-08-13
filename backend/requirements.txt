@@ -2,3 +2,4 @@ pocket-tts
 fastapi
 uvicorn
 scipy
+soundfile
