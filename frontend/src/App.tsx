@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import JarvisBlob from './components/JarvisBlob'
 import HudBar from './components/HudBar'
@@ -35,6 +35,14 @@ export default function App() {
     position: 'center',
   })
   const [consoleOpen, setConsoleOpen] = useState(true)
+  const shadowRef = useRef<HTMLDivElement>(null)
+
+  // failsafe: whatever happens, the core always drifts home to breathing
+  useEffect(() => {
+    if (state === 'breathing') return
+    const id = setTimeout(() => setState('breathing'), 12000)
+    return () => clearTimeout(id)
+  }, [state])
 
   const executeUICommand = (name: string, args: Record<string, unknown>): string => {
     switch (name) {
@@ -72,14 +80,10 @@ export default function App() {
         dpr={[1, 2]}
         gl={{ antialias: true, alpha: true }}
       >
-        <JarvisBlob state={state} />
+        <JarvisBlob state={state} shadowRef={shadowRef} />
       </Canvas>
       <div className="hex-wrap" aria-hidden>
-        <svg className="hex-frame" viewBox="0 0 100 115">
-          <polygon points="50,2 97,30 97,86 50,113 3,86 3,30" />
-          <polygon className="hex-inner" points="50,7 93,33 93,83 50,109 7,83 7,33" />
-        </svg>
-        <div className="pedestal-glow" />
+        <div ref={shadowRef} className="pedestal-glow" />
       </div>
       <HudBar
         state={state}

@@ -269,7 +269,7 @@ canvas {
   cursor: default;
 }
 
-/* ---- hex frame + pedestal ---- */
+/* ---- blob floor shadow ---- */
 .hex-wrap {
   position: absolute;
   inset: 0;
@@ -279,30 +279,14 @@ canvas {
   z-index: 5;
 }
 
-.hex-frame {
-  width: min(58vh, 46vw);
-  overflow: visible;
-}
-
-.hex-frame polygon {
-  fill: none;
-  stroke: var(--ember-dim);
-  stroke-width: 0.45;
-}
-
-.hex-frame .hex-inner {
-  stroke: var(--ember-faint);
-  stroke-width: 0.3;
-  stroke-dasharray: 3 2;
-}
-
 .pedestal-glow {
   position: absolute;
-  bottom: 18%;
-  width: 260px;
-  height: 44px;
-  background: radial-gradient(ellipse, var(--ember-dim) 0%, transparent 70%);
-  filter: blur(6px);
+  bottom: 17%;
+  width: 300px;
+  height: 52px;
+  background: radial-gradient(ellipse, var(--ember-dim) 0%, rgba(255, 140, 46, 0.12) 45%, transparent 70%);
+  filter: blur(8px);
+  will-change: transform, opacity;
 }
 
 /* ---- info cards (clock / weather / env) ---- */
