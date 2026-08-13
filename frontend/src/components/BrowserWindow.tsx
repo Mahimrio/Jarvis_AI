@@ -1,6 +1,32 @@
 import { useEffect, useRef, useState } from 'react'
 import gsap from 'gsap'
 
+export type Anchor = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center'
+
+const WIN_W = 560
+const WIN_H = 420
+
+function anchorXY(a: Anchor): { x: number; y: number } {
+  const m = 16
+  const sidebar = 76
+  const top = 64
+  const bottom = 52
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  switch (a) {
+    case 'top-left':
+      return { x: sidebar + m, y: top + m }
+    case 'top-right':
+      return { x: vw - WIN_W - m, y: top + m }
+    case 'bottom-left':
+      return { x: sidebar + m, y: vh - WIN_H - bottom - m }
+    case 'bottom-right':
+      return { x: vw - WIN_W - m, y: vh - WIN_H - bottom - m }
+    default:
+      return { x: (vw - WIN_W) / 2, y: (vh - WIN_H) / 2 }
+  }
+}
+
 const QUICK_LINKS: Record<string, string> = {
   Google: 'https://www.google.com/webhp?igu=1',
   Wikipedia: 'https://www.wikipedia.org',
@@ -18,28 +44,56 @@ function toUrl(raw: string): string {
 
 interface Props {
   url: string
+  position: Anchor
   onClose: () => void
 }
 
-export default function BrowserWindow({ url, onClose }: Props) {
+export default function BrowserWindow({ url, position, onClose }: Props) {
   const winRef = useRef<HTMLDivElement>(null)
   const drag = useRef({ active: false, dx: 0, dy: 0 })
-  const [pos, setPos] = useState({ x: 24, y: 72 })
+  const [pos, setPos] = useState(() => anchorXY('center'))
   const [address, setAddress] = useState(url)
   const [src, setSrc] = useState(url)
+  const mounted = useRef(false)
 
   useEffect(() => {
     setAddress(url)
     setSrc(url)
   }, [url])
 
+  // fly the window to its anchor: zoom in center first on mount, then dock
   useEffect(() => {
-    gsap.fromTo(
-      winRef.current,
-      { scale: 0.5, opacity: 0, transformOrigin: '50% 50%' },
-      { scale: 1, opacity: 1, duration: 0.55, ease: 'power3.out' }
-    )
-  }, [])
+    const target = anchorXY(position)
+    const proxy = { ...pos }
+    if (!mounted.current) {
+      mounted.current = true
+      const tl = gsap.timeline()
+      tl.fromTo(
+        winRef.current,
+        { scale: 0.45, opacity: 0, transformOrigin: '50% 50%' },
+        { scale: 1, opacity: 1, duration: 0.5, ease: 'power3.out' }
+      )
+      if (position !== 'center') {
+        tl.to(proxy, {
+          x: target.x,
+          y: target.y,
+          duration: 0.85,
+          ease: 'power3.inOut',
+          onUpdate: () => setPos({ x: proxy.x, y: proxy.y }),
+        }, '+=0.25')
+        tl.fromTo(winRef.current, { scale: 1 }, { scale: 0.96, yoyo: true, repeat: 1, duration: 0.42 }, '<')
+      }
+      return
+    }
+    gsap.to(proxy, {
+      x: target.x,
+      y: target.y,
+      duration: 0.85,
+      ease: 'power3.inOut',
+      onUpdate: () => setPos({ x: proxy.x, y: proxy.y }),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [position])
 
   const close = () => {
     gsap.to(winRef.current, {

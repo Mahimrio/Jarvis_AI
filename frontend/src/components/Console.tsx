@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
 import type { OrbState } from './states'
-import { chatStream, hasKey, type ChatMessage } from '../lib/groq'
+import { runChat, hasKey, type ChatMessage, type ToolExecutor } from '../lib/groq'
 import { speechSupported, useSpeech } from '../lib/speech'
 import { speak, stopSpeaking, ttsAvailable } from '../lib/tts'
 
@@ -18,9 +18,10 @@ interface Props {
   state: OrbState
   onOpenBrowser: (url: string) => void
   onStateChange: (s: OrbState) => void
+  executeUICommand: ToolExecutor
 }
 
-export default function Console({ state, onOpenBrowser, onStateChange }: Props) {
+export default function Console({ state, onOpenBrowser, onStateChange, executeUICommand }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'jarvis',
@@ -64,10 +65,14 @@ export default function Console({ state, onOpenBrowser, onStateChange }: Props) 
         content: m.text,
       }))
       let acc = ''
-      for await (const chunk of chatStream(history)) {
-        acc += chunk
-        setMessages([...base, { role: 'jarvis', text: acc }])
-      }
+      await runChat({
+        history,
+        onDelta: (chunk) => {
+          acc += chunk
+          setMessages([...base, { role: 'jarvis', text: acc }])
+        },
+        executeTool: executeUICommand,
+      })
       if (voiceOn && ttsOnline && acc) {
         onStateChange('composing')
         await speak(acc)
