@@ -1,5 +1,5 @@
 export const STATES = [
-  'working',
+  'talking',
   'searching',
   'solving',
   'listening',

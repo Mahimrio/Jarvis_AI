@@ -61,6 +61,8 @@ interface Props {
 }
 
 export default function Console({ state, onOpenBrowser, onStateChange, executeUICommand, onCollapse }: Props) {
+  // thinking-orbs has no 'talking' state — map it for the mini avatars
+  const orbState = state === 'talking' ? 'composing' : state
   // 'auto' routes per message; otherwise a pinned provider id
   const [mode, setMode] = useState<'auto' | string>(anyKeyPresent ? 'auto' : PROVIDERS[0].id)
   const [lastUsed, setLastUsed] = useState<Provider | null>(null)
@@ -111,7 +113,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
     if (!ttsOnline || greetedRef.current) return
     greetedRef.current = true
     whenAudioReady(() => {
-      onStateChange('composing')
+      onStateChange('talking')
       speak(greeting).finally(() => onStateChange('breathing'))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,7 +134,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
     if (IDENTITY_RE.test(text)) {
       setMessages([...base, { role: 'jarvis', text: IDENTITY_REPLY }])
       if (voiceOn && ttsOnline) {
-        onStateChange('composing')
+        onStateChange('talking')
         speak(IDENTITY_REPLY).finally(() => onStateChange('breathing'))
       }
       return
@@ -150,7 +152,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
     const candidates = [primary, ...PROVIDERS.filter((p) => p.id !== primary.id && providerAvailable(p))]
 
     setBusy(true)
-    onStateChange('working')
+    onStateChange('solving')
     stopSpeaking() // interrupt any ongoing speech for the new exchange
     let acc = ''
     let sentUpTo = 0 // how much of the cleaned text has been queued for speech
@@ -215,7 +217,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
       const leftover = cleaned.slice(sentUpTo).trim()
       if (leftover) enqueueSpeech(leftover)
       if (sentUpTo > 0 || leftover) {
-        onStateChange('composing')
+        onStateChange('talking')
         void waitForSpeechIdle().then(() => onStateChange('breathing'))
         return
       }
@@ -343,7 +345,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
           <div key={i} className={`console-msg ${m.role}`}>
             {m.role === 'jarvis' && (
               <span className="console-msg-orb">
-                <ThinkingOrb state={state} size={20} theme="dark" style={orangeTint} />
+                <ThinkingOrb state={orbState} size={20} theme="dark" style={orangeTint} />
               </span>
             )}
             {m.text === '…' ? (

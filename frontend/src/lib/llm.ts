@@ -159,7 +159,7 @@ const TOOLS = [
         properties: {
           state: {
             type: 'string',
-            enum: ['working', 'searching', 'solving', 'listening', 'connecting', 'weaving', 'composing', 'breathing', 'shaping'],
+            enum: ['talking', 'searching', 'solving', 'listening', 'connecting', 'weaving', 'composing', 'breathing', 'shaping'],
           },
         },
         required: ['state'],
