@@ -2,13 +2,23 @@ import { useEffect, useRef, useState } from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
 import gsap from 'gsap'
 import type { OrbState } from './states'
-import { runChat, hasKey, type ChatMessage, type ToolExecutor } from '../lib/groq'
+import { runChat, PROVIDERS, providerAvailable, anyKeyPresent, pickProvider, type ChatMessage, type Provider, type ToolExecutor } from '../lib/llm'
 import { speechSupported, useSpeech } from '../lib/speech'
-import { speak, stopSpeaking, ttsAvailable } from '../lib/tts'
+import { speak, stopSpeaking, ttsAvailable, whenAudioReady } from '../lib/tts'
 
 const orangeTint = {
   filter: 'sepia(1) saturate(4) hue-rotate(-15deg) brightness(1.15)',
 }
+
+const GREETINGS = [
+  'Hello sir. How can I help you today?',
+  'Hello sir. What can I do for you?',
+  'Hello sir. How may I assist you today?',
+]
+
+// direct questions about identity get a fixed answer, no model call
+const IDENTITY_RE = /\b(who\s*(are|r)\s*(you|u)|what\s*(are|r)\s*(you|u)|your name|who\s*(made|created|built|developed|designed)\s*(you|u)|who'?s your (creator|developer|maker|builder))\b/i
+const IDENTITY_REPLY = 'I am Jarvis, developed by Mahim Abdullah Rianto.'
 
 function SpeakerIcon({ muted }: { muted: boolean }) {
   return (
@@ -51,12 +61,21 @@ interface Props {
 }
 
 export default function Console({ state, onOpenBrowser, onStateChange, executeUICommand, onCollapse }: Props) {
+  // 'auto' routes per message; otherwise a pinned provider id
+  const [mode, setMode] = useState<'auto' | string>(anyKeyPresent ? 'auto' : PROVIDERS[0].id)
+  const [lastUsed, setLastUsed] = useState<Provider | null>(null)
+  const [modelOpen, setModelOpen] = useState(false)
+  const pinned = mode === 'auto' ? null : PROVIDERS.find((p) => p.id === mode) ?? PROVIDERS[0]
+  const activeReady = mode === 'auto' ? anyKeyPresent : !!pinned && providerAvailable(pinned)
+  const modelLabel = mode === 'auto' ? `AUTO${lastUsed ? ` · ${lastUsed.short}` : ''}` : pinned!.short
+  const greeting = useRef(GREETINGS[Math.floor(Math.random() * GREETINGS.length)]).current
+  const greetedRef = useRef(false)
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'jarvis',
-      text: hasKey
-        ? 'Systems online. Groq uplink established — how can I assist?'
-        : 'Systems online, but no Groq key detected. Paste your key into frontend/.env (VITE_GROQ_API_KEY) and restart the dev server.',
+      text: anyKeyPresent
+        ? greeting
+        : 'Systems online, but no API key detected. Add VITE_GROQ_API_KEY or VITE_GEMINI_API_KEY to frontend/.env and restart the dev server.',
     },
   ])
   const [input, setInput] = useState('')
@@ -87,6 +106,17 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
     ttsAvailable().then(setTtsOnline)
   }, [])
 
+  // greet with voice once the voice server is up (waits for first user gesture)
+  useEffect(() => {
+    if (!ttsOnline || greetedRef.current) return
+    greetedRef.current = true
+    whenAudioReady(() => {
+      onStateChange('composing')
+      speak(greeting).finally(() => onStateChange('breathing'))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ttsOnline])
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [messages])
@@ -97,22 +127,38 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
     setInput('')
 
     const base: Message[] = [...messages, { role: 'user', text }]
-    setMessages([...base, { role: 'jarvis', text: '…' }])
 
-    if (!hasKey) {
-      setMessages([...base, { role: 'jarvis', text: 'No Groq key configured — add VITE_GROQ_API_KEY to frontend/.env and restart.' }])
+    // fixed identity answer — no model round-trip
+    if (IDENTITY_RE.test(text)) {
+      setMessages([...base, { role: 'jarvis', text: IDENTITY_REPLY }])
+      if (voiceOn && ttsOnline) {
+        onStateChange('composing')
+        speak(IDENTITY_REPLY).finally(() => onStateChange('breathing'))
+      }
       return
     }
 
+    setMessages([...base, { role: 'jarvis', text: '…' }])
+
+    if (!activeReady) {
+      setMessages([...base, { role: 'jarvis', text: `No API key available — add one to frontend/.env and restart.` }])
+      return
+    }
+
+    // resolve which brain answers this message
+    const provider = mode === 'auto' ? pickProvider(text) : pinned ?? PROVIDERS[0]
+    setLastUsed(provider)
+
     setBusy(true)
     onStateChange('working')
+    let acc = ''
     try {
       const history: ChatMessage[] = base.map((m) => ({
         role: m.role === 'jarvis' ? 'assistant' : 'user',
         content: m.text,
       }))
-      let acc = ''
       await runChat({
+        provider,
         history,
         onDelta: (chunk) => {
           acc += chunk
@@ -120,14 +166,18 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
         },
         executeTool: executeUICommand,
       })
-      if (voiceOn && ttsOnline && acc) {
-        onStateChange('composing')
-        await speak(acc)
-      }
     } catch (err) {
       setMessages([...base, { role: 'jarvis', text: `Uplink error: ${err instanceof Error ? err.message : err}` }])
     } finally {
+      // re-enable input as soon as the text reply is done — voice plays independently
       setBusy(false)
+    }
+
+    // speak in the background; never blocks the input
+    if (voiceOn && ttsOnline && acc) {
+      onStateChange('composing')
+      speak(acc).finally(() => onStateChange('breathing'))
+    } else {
       onStateChange('breathing')
     }
   }
@@ -162,7 +212,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
     <aside className="console cut" ref={rootRef}>
       <div className="console-header">
         <span className="console-title">
-          <span className={`console-led${hasKey ? ' on' : ''}`} />
+          <span className={`console-led${activeReady ? ' on' : ''}`} />
           NEURAL LINK
         </span>
         <span className="console-header-right">
@@ -183,9 +233,47 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
         </span>
       </div>
       <div className="console-meta-line">
-        <span>{hasKey ? 'GROQ LPU · ONLINE' : 'NO API KEY'}</span>
+        <div className="model-picker">
+          <button
+            type="button"
+            className={`model-btn${modelOpen ? ' open' : ''}`}
+            onClick={() => setModelOpen((v) => !v)}
+            title="Switch model"
+          >
+            {modelLabel} ▾
+          </button>
+          {modelOpen && (
+            <div className="model-menu">
+              <button
+                type="button"
+                className={`model-option${mode === 'auto' ? ' active' : ''}${anyKeyPresent ? '' : ' locked'}`}
+                disabled={!anyKeyPresent}
+                onClick={() => {
+                  setMode('auto')
+                  setModelOpen(false)
+                }}
+              >
+                ⚡ Auto · smart routing
+              </button>
+              {PROVIDERS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`model-option${p.id === mode ? ' active' : ''}${providerAvailable(p) ? '' : ' locked'}`}
+                  disabled={!providerAvailable(p)}
+                  onClick={() => {
+                    setMode(p.id)
+                    setModelOpen(false)
+                  }}
+                >
+                  {p.label}{providerAvailable(p) ? '' : ' · no key'}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <span>
-          LLAMA 3.3 · STREAM · <em className={busy ? 'live' : ''}>{busy ? 'STREAMING' : 'IDLE'}</em>
+          STREAM · <em className={busy ? 'live' : ''}>{busy ? 'STREAMING' : 'IDLE'}</em>
         </span>
       </div>
       <div className="console-chips">

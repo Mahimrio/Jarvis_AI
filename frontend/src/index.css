@@ -686,6 +686,86 @@ canvas {
   animation: dot-pulse 1s ease-in-out infinite;
 }
 
+/* model picker */
+.model-picker {
+  position: relative;
+}
+
+.model-btn {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 1.8px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgba(255, 140, 46, 0.06);
+  color: var(--ember-soft);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.model-btn:hover,
+.model-btn.open {
+  border-color: var(--ember-dim);
+  box-shadow: 0 0 8px var(--ember-faint);
+}
+
+.model-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(12, 9, 6, 0.97);
+  border: 1px solid var(--ember-dim);
+  border-radius: 6px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6), 0 0 18px var(--ember-faint);
+  padding: 4px;
+  z-index: 40;
+  transform-origin: top left;
+  animation: menu-in 0.2s ease both;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.model-option {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  text-align: left;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.model-option:hover {
+  color: var(--ember-soft);
+  background: var(--ember-faint);
+}
+
+.model-option.active {
+  color: var(--ember);
+}
+
+.model-option.locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .console-header-right {
   display: flex;
   align-items: center;

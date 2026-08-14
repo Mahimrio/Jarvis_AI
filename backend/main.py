@@ -64,8 +64,13 @@ def health():
 @app.post("/tts")
 def tts(req: TTSRequest):
     text = clamp_text(req.text)
-    with generate_lock:
+    # timed acquire so an abandoned stream can never deadlock the server
+    if not generate_lock.acquire(timeout=30):
+        raise HTTPException(status_code=503, detail="Voice engine busy")
+    try:
         audio = model.generate_audio(voice_state, text)
+    finally:
+        generate_lock.release()
     buf = io.BytesIO()
     scipy.io.wavfile.write(buf, model.sample_rate, audio.numpy())
     return Response(content=buf.getvalue(), media_type="audio/wav")
@@ -76,10 +81,15 @@ def tts_stream(req: TTSRequest):
     text = clamp_text(req.text)
 
     def pcm_chunks():
-        with generate_lock:
+        if not generate_lock.acquire(timeout=30):
+            return
+        try:
             for chunk in model.generate_audio_stream(voice_state, text):
                 pcm = np.clip(chunk.numpy(), -1.0, 1.0)
                 yield (pcm * 32767.0).astype("<i2").tobytes()
+        finally:
+            # released even if the client disconnects mid-stream
+            generate_lock.release()
 
     return StreamingResponse(
         pcm_chunks(),

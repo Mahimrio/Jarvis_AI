@@ -12,19 +12,33 @@ import { STATES, type OrbState } from './components/states'
 const HOME = 'https://www.google.com/webhp?igu=1'
 const YT_HOME = 'https://www.youtube.com/embed/videoseries?list=UUsooa4yRKGN_zEE8iknghZA'
 
+const ANCHORS: Anchor[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'center']
+
+// models format position loosely ("top_right", "TOP RIGHT") — normalize to our anchors
+function normalizeAnchor(value: unknown): Anchor {
+  if (typeof value !== 'string') return 'center'
+  const v = value.toLowerCase().replace(/[\s_]+/g, '-')
+  return (ANCHORS as string[]).includes(v) ? (v as Anchor) : 'center'
+}
+
 function resolveUrl(args: Record<string, unknown>): string {
-  const url = typeof args.url === 'string' ? args.url.trim() : ''
-  if (url) return /^https?:\/\//i.test(url) ? url : `https://${url}`
+  const rawUrl = typeof args.url === 'string' ? args.url.trim() : ''
+  const rawSite = typeof args.site === 'string' ? args.site.trim() : ''
   const query = typeof args.query === 'string' ? args.query.trim() : ''
   const enc = encodeURIComponent(query)
-  switch (args.site) {
-    case 'youtube':
-      return query ? `https://www.google.com/search?igu=1&q=${enc}+youtube` : YT_HOME
-    case 'wikipedia':
-      return query ? `https://en.wikipedia.org/wiki/Special:Search?search=${enc}` : 'https://www.wikipedia.org'
-    default:
-      return query ? `https://www.google.com/search?igu=1&q=${enc}` : HOME
+
+  // a direct URL may arrive in either `url` or `site`
+  const direct = rawUrl || (/^https?:\/\/|\.[a-z]{2,}/i.test(rawSite) ? rawSite : '')
+  if (direct) {
+    const full = /^https?:\/\//i.test(direct) ? direct : `https://${direct}`
+    if (/youtube\.com|youtu\.be/i.test(full)) return YT_HOME
+    return full
   }
+
+  const site = rawSite.toLowerCase()
+  if (site.includes('youtube')) return query ? `https://www.google.com/search?igu=1&q=${enc}+youtube` : YT_HOME
+  if (site.includes('wikipedia')) return query ? `https://en.wikipedia.org/wiki/Special:Search?search=${enc}` : 'https://www.wikipedia.org'
+  return query ? `https://www.google.com/search?igu=1&q=${enc}` : HOME
 }
 
 export default function App() {
@@ -71,13 +85,13 @@ export default function App() {
     switch (name) {
       case 'open_browser': {
         const url = resolveUrl(args)
-        const position = (args.position as Anchor) ?? 'center'
+        const position = normalizeAnchor(args.position)
         setBrowser({ open: true, url, position })
         return `Browser window opened at ${position} showing ${url}`
       }
       case 'move_browser': {
         if (!browser.open) return 'No browser window is open.'
-        const position = args.position as Anchor
+        const position = normalizeAnchor(args.position)
         setBrowser((b) => ({ ...b, position }))
         return `Browser window moved to ${position}`
       }
