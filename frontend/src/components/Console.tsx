@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
 import gsap from 'gsap'
 import type { OrbState } from './states'
-import { runChat, PROVIDERS, providerAvailable, anyKeyPresent, pickProvider, type ChatMessage, type Provider, type ToolExecutor } from '../lib/llm'
+import { runChat, PROVIDERS, providerAvailable, anyKeyPresent, pickProvider, stripToolLeakage, type ChatMessage, type Provider, type ToolExecutor } from '../lib/llm'
 import { speechSupported, useSpeech } from '../lib/speech'
-import { speak, stopSpeaking, ttsAvailable, whenAudioReady } from '../lib/tts'
+import { speak, stopSpeaking, ttsAvailable, whenAudioReady, enqueueSpeech, waitForSpeechIdle } from '../lib/tts'
 
 const orangeTint = {
   filter: 'sepia(1) saturate(4) hue-rotate(-15deg) brightness(1.15)',
@@ -145,27 +145,62 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
       return
     }
 
-    // resolve which brain answers this message
-    const provider = mode === 'auto' ? pickProvider(text) : pinned ?? PROVIDERS[0]
-    setLastUsed(provider)
+    // resolve which brain answers this message, with automatic failover
+    const primary = mode === 'auto' ? pickProvider(text) : pinned ?? PROVIDERS[0]
+    const candidates = [primary, ...PROVIDERS.filter((p) => p.id !== primary.id && providerAvailable(p))]
 
     setBusy(true)
     onStateChange('working')
+    stopSpeaking() // interrupt any ongoing speech for the new exchange
     let acc = ''
+    let sentUpTo = 0 // how much of the cleaned text has been queued for speech
+    const speakLive = voiceOn && ttsOnline
     try {
       const history: ChatMessage[] = base.map((m) => ({
         role: m.role === 'jarvis' ? 'assistant' : 'user',
         content: m.text,
       }))
-      await runChat({
-        provider,
-        history,
-        onDelta: (chunk) => {
-          acc += chunk
-          setMessages([...base, { role: 'jarvis', text: acc }])
-        },
-        executeTool: executeUICommand,
-      })
+      let lastError: unknown = null
+      for (const provider of candidates) {
+        acc = ''
+        sentUpTo = 0
+        setLastUsed(provider)
+        try {
+          await runChat({
+            provider,
+            history,
+            onDelta: (chunk) => {
+              acc += chunk
+              const cleaned = stripToolLeakage(acc)
+              setMessages([...base, { role: 'jarvis', text: cleaned || '…' }])
+              // speak each sentence the moment it completes, parallel to the stream
+              if (speakLive) {
+                let lastEnd = -1
+                const re = /[.!?](?=\s|$)/g
+                let m: RegExpExecArray | null
+                while ((m = re.exec(cleaned))) lastEnd = m.index
+                if (lastEnd >= sentUpTo) {
+                  const sentence = cleaned.slice(sentUpTo, lastEnd + 1).trim()
+                  if (sentence) enqueueSpeech(sentence)
+                  sentUpTo = lastEnd + 1
+                }
+              }
+            },
+            executeTool: executeUICommand,
+          })
+          if (!stripToolLeakage(acc).trim()) {
+            // silent rate-limit: 200 with an empty stream — try the next brain
+            lastError = new Error(`${provider.label} returned an empty response (rate limited?)`)
+            continue
+          }
+          lastError = null
+          break // success — no failover needed
+        } catch (err) {
+          lastError = err
+          stopSpeaking() // discard any partial speech before retrying on the next brain
+        }
+      }
+      if (lastError) throw lastError
     } catch (err) {
       setMessages([...base, { role: 'jarvis', text: `Uplink error: ${err instanceof Error ? err.message : err}` }])
     } finally {
@@ -173,13 +208,19 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
       setBusy(false)
     }
 
-    // speak in the background; never blocks the input
-    if (voiceOn && ttsOnline && acc) {
-      onStateChange('composing')
-      speak(acc).finally(() => onStateChange('breathing'))
-    } else {
-      onStateChange('breathing')
+    const cleaned = stripToolLeakage(acc)
+    if (cleaned !== acc) setMessages([...base, { role: 'jarvis', text: cleaned || 'Acknowledged, sir.' }])
+
+    if (speakLive) {
+      const leftover = cleaned.slice(sentUpTo).trim()
+      if (leftover) enqueueSpeech(leftover)
+      if (sentUpTo > 0 || leftover) {
+        onStateChange('composing')
+        void waitForSpeechIdle().then(() => onStateChange('breathing'))
+        return
+      }
     }
+    onStateChange('breathing')
   }
 
   const { listening, interim, error: speechError, start, stop } = useSpeech({

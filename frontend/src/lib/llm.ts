@@ -52,6 +52,16 @@ export function providerAvailable(p: Provider): boolean {
   return isReal(p.getKey())
 }
 
+// Llama sometimes leaks tool-call markup as plain text — scrub it from replies
+export function stripToolLeakage(text: string): string {
+  return text
+    .replace(/<function[\s\S]*?<\/function>/g, '')
+    .replace(/<function[\s\S]*$/g, '')
+    .replace(/<\/?function[^>]*>/g, '')
+    .replace(/<\|?tool_call\|?>[\s\S]*$/g, '')
+    .trim()
+}
+
 export const anyKeyPresent = PROVIDERS.some(providerAvailable)
 
 const byId = (id: string) => PROVIDERS.find((p) => p.id === id)
@@ -191,20 +201,36 @@ async function streamOnce(
   onDelta: (text: string) => void,
   withTools: boolean
 ): Promise<{ text: string; toolCalls: ApiToolCall[] }> {
-  const res = await fetch(provider.baseUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${provider.getKey()}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: provider.model,
-      stream: true,
-      messages,
-      ...(withTools ? { tools: TOOLS, tool_choice: 'auto' } : {}),
-    }),
-  })
+  // abort if the provider stalls before producing anything (rate-limit queueing)
+  const controller = new AbortController()
+  let gotFirstChunk = false
+  const stallTimer = setTimeout(() => {
+    if (!gotFirstChunk) controller.abort()
+  }, 12000)
+
+  let res: Response
+  try {
+    res = await fetch(provider.baseUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${provider.getKey()}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: provider.model,
+        stream: true,
+        messages,
+        ...(withTools ? { tools: TOOLS, tool_choice: 'auto' } : {}),
+      }),
+    })
+  } catch (err) {
+    clearTimeout(stallTimer)
+    if (controller.signal.aborted) throw new Error(`${provider.label} stalled (rate limited?)`)
+    throw err
+  }
   if (!res.ok || !res.body) {
+    clearTimeout(stallTimer)
     const detail = await res.text().catch(() => '')
     throw new Error(
       `${provider.label} responded ${res.status}${res.status === 401 ? ' (bad API key)' : ''}${
@@ -218,10 +244,15 @@ async function streamOnce(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!gotFirstChunk) {
+        gotFirstChunk = true
+        clearTimeout(stallTimer)
+      }
+      buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''
     for (const line of lines) {
@@ -254,6 +285,14 @@ async function streamOnce(
         if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments
       }
     }
+    }
+  } catch (err) {
+    if (controller.signal.aborted && !gotFirstChunk) {
+      throw new Error(`${provider.label} stalled (rate limited?)`)
+    }
+    throw err
+  } finally {
+    clearTimeout(stallTimer)
   }
   return { text, toolCalls: toolCalls.filter(Boolean) }
 }

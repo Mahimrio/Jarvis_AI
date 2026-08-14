@@ -2,6 +2,9 @@ const TTS_URL = 'http://localhost:8765'
 
 let current: HTMLAudioElement | null = null
 let activeGeneration = 0
+let queue: Promise<string>[] = []
+let pumping = false
+let idleResolvers: (() => void)[] = []
 
 // browsers block audio until the first user gesture — run queued callbacks then
 let audioUnlocked = false
@@ -32,42 +35,86 @@ export async function ttsAvailable(): Promise<boolean> {
   }
 }
 
+function resolveIdle() {
+  idleResolvers.splice(0).forEach((r) => r())
+}
+
 export function stopSpeaking() {
   activeGeneration++
+  queue = []
   if (current) {
     current.pause()
     current.src = ''
     current = null
   }
+  resolveIdle()
 }
 
-// fetches the full WAV and plays it via an audio element (reliable everywhere)
-export async function speak(text: string): Promise<void> {
-  stopSpeaking()
-  const generation = activeGeneration
-
+async function fetchWavUrl(text: string): Promise<string> {
   const res = await fetch(`${TTS_URL}/tts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   })
   if (!res.ok) throw new Error(`TTS server responded ${res.status}`)
-  const url = URL.createObjectURL(await res.blob())
-  if (generation !== activeGeneration) {
-    URL.revokeObjectURL(url)
-    return
-  }
+  return URL.createObjectURL(await res.blob())
+}
 
-  const audio = new Audio(url)
-  audio.volume = 1
-  current = audio
-  await new Promise<void>((resolve) => {
-    const finish = () => resolve()
+function playUrl(url: string): Promise<void> {
+  return new Promise((resolve) => {
+    const audio = new Audio(url)
+    current = audio
+    const finish = () => {
+      if (current === audio) current = null
+      resolve()
+    }
     audio.onended = finish
     audio.onerror = finish
     audio.onpause = finish
     audio.play().catch(finish)
   })
-  URL.revokeObjectURL(url)
-  if (current === audio) current = null
+}
+
+async function pump(gen: number) {
+  if (pumping) return
+  pumping = true
+  try {
+    while (queue.length > 0 && gen === activeGeneration) {
+      const next = queue.shift()!
+      let url: string
+      try {
+        url = await next
+      } catch {
+        continue
+      }
+      if (gen !== activeGeneration) {
+        URL.revokeObjectURL(url)
+        break
+      }
+      await playUrl(url)
+      URL.revokeObjectURL(url)
+    }
+  } finally {
+    pumping = false
+    if (queue.length === 0) resolveIdle()
+  }
+}
+
+// queue a sentence: its audio is fetched immediately (prefetch), played in order
+export function enqueueSpeech(text: string) {
+  const t = text.trim()
+  if (!t) return
+  queue.push(fetchWavUrl(t))
+  void pump(activeGeneration)
+}
+
+export function waitForSpeechIdle(): Promise<void> {
+  if (!pumping && queue.length === 0) return Promise.resolve()
+  return new Promise((res) => idleResolvers.push(res))
+}
+
+export async function speak(text: string): Promise<void> {
+  stopSpeaking()
+  enqueueSpeech(text)
+  return waitForSpeechIdle()
 }
