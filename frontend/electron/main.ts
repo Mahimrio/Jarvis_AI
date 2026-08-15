@@ -82,6 +82,13 @@ function createWindow() {
 ipcMain.handle('jarvis:quit', () => app.quit())
 ipcMain.handle('jarvis:minimize', () => win?.minimize())
 
+// auto-start with Windows (fully effective once packaged; dev registers the electron binary)
+ipcMain.handle('jarvis:autolaunch:get', () => app.getLoginItemSettings().openAtLogin)
+ipcMain.handle('jarvis:autolaunch:set', (_e, on: boolean) => {
+  app.setLoginItemSettings({ openAtLogin: on })
+  return app.getLoginItemSettings().openAtLogin
+})
+
 app.whenReady().then(() => {
   ensureBackend()
   createWindow()

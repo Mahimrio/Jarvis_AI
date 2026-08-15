@@ -6,4 +6,6 @@ contextBridge.exposeInMainWorld('jarvis', {
   platform: process.platform,
   quit: () => ipcRenderer.invoke('jarvis:quit'),
   minimize: () => ipcRenderer.invoke('jarvis:minimize'),
+  getAutolaunch: () => ipcRenderer.invoke('jarvis:autolaunch:get'),
+  setAutolaunch: (on: boolean) => ipcRenderer.invoke('jarvis:autolaunch:set', on),
 })

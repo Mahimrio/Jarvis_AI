@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import SidePanel from './SidePanel'
 import { getSettings, setSetting, ALL_NEWS_CATS } from '../lib/settings'
 import { PROVIDERS } from '../lib/llm'
 import { clearFeed } from '../lib/feed'
 import { clearChatLog } from '../lib/memlog'
+import { isDesktop, getAutolaunch, setAutolaunch } from '../lib/os'
 
 interface Props {
   closing: boolean
@@ -14,6 +15,15 @@ interface Props {
 export default function SettingsPanel(props: Props) {
   const [settings, setSettings] = useState(getSettings)
   const [flash, setFlash] = useState('')
+  const [autoStart, setAutoStart] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    if (isDesktop()) void getAutolaunch().then(setAutoStart)
+  }, [])
+
+  const toggleAutoStart = async (on: boolean) => {
+    setAutoStart(await setAutolaunch(on))
+  }
 
   const update = <K extends keyof ReturnType<typeof getSettings>>(key: K, value: ReturnType<typeof getSettings>[K]) => {
     setSetting(key, value)
@@ -71,6 +81,28 @@ export default function SettingsPanel(props: Props) {
           EMBEDDED
         </button>
       </div>
+
+      {isDesktop() && (
+        <>
+          <p className="settings-group">AUTO-START WITH WINDOWS</p>
+          <div className="settings-chips">
+            <button
+              type="button"
+              className={`feed-chip${autoStart === true ? ' active' : ''}`}
+              onClick={() => toggleAutoStart(true)}
+            >
+              ON
+            </button>
+            <button
+              type="button"
+              className={`feed-chip${autoStart === false ? ' active' : ''}`}
+              onClick={() => toggleAutoStart(false)}
+            >
+              OFF
+            </button>
+          </div>
+        </>
+      )}
 
       <p className="settings-group">DEFAULT MODEL</p>
       <div className="settings-chips">

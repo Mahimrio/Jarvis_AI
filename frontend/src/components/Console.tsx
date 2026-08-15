@@ -6,16 +6,25 @@ import { speechSupported, useSpeech, useWakeWord } from '../lib/speech'
 import { speak, stopSpeaking, ttsAvailable, whenAudioReady, enqueueSpeech, waitForSpeechIdle, getVoiceSpectrum, forceAudioUnlock } from '../lib/tts'
 import { getSettings, setSetting } from '../lib/settings'
 import { appendChatLog } from '../lib/memlog'
+import { isDesktop } from '../lib/os'
 
 const orangeTint = {
   filter: 'sepia(1) saturate(4) hue-rotate(-15deg) brightness(1.15)',
 }
 
-const GREETINGS = [
-  'Hello sir. How can I help you today?',
-  'Hello sir. What can I do for you?',
-  'Hello sir. How may I assist you today?',
-]
+// time-aware greetings, JARVIS style
+function pickGreeting(): string {
+  const h = new Date().getHours()
+  const pool =
+    h >= 5 && h < 12
+      ? ['Good morning sir. All systems are online.', 'Good morning sir. Ready when you are.']
+      : h >= 12 && h < 17
+        ? ['Good afternoon sir. How can I help?', 'Good afternoon sir. At your service.']
+        : h >= 17 && h < 22
+          ? ['Good evening sir. Systems standing by.', 'Good evening sir. What do you need?']
+          : ['Working late again, sir? I\u2019m here.', 'Burning the midnight oil, sir? At your service.']
+  return pool[Math.floor(Math.random() * pool.length)]
+}
 
 // direct questions about identity get a fixed answer, no model call
 const IDENTITY_RE = /\b(who\s*(are|r)\s*(you|u)|what\s*(are|r)\s*(you|u)|your name|who\s*(made|created|built|developed|designed)\s*(you|u)|who'?s your (creator|developer|maker|builder))\b/i
@@ -109,7 +118,7 @@ export default function Console({ state, hidden, onRequestOpen, onOpenBrowser, o
   const pinned = mode === 'auto' ? null : PROVIDERS.find((p) => p.id === mode) ?? PROVIDERS[0]
   const activeReady = mode === 'auto' ? anyKeyPresent : !!pinned && providerAvailable(pinned)
   const modelLabel = mode === 'auto' ? `AUTO${lastUsed ? ` · ${lastUsed.short}` : ''}` : pinned!.short
-  const greeting = useRef(GREETINGS[Math.floor(Math.random() * GREETINGS.length)]).current
+  const greeting = useRef(pickGreeting()).current
   const greetedRef = useRef(false)
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -143,6 +152,14 @@ export default function Console({ state, hidden, onRequestOpen, onOpenBrowser, o
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hidden, ttsOnline])
+
+  // desktop shell: no wake word yet — open and greet on boot once the voice is ready
+  useEffect(() => {
+    if (!isDesktop() || greetedRef.current || !ttsOnline) return
+    forceAudioUnlock() // Electron runs with autoplay enabled
+    onRequestOpen()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ttsOnline])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })

@@ -4,6 +4,8 @@ export interface JarvisBridge {
   platform: string
   quit: () => Promise<void>
   minimize: () => Promise<void>
+  getAutolaunch: () => Promise<boolean>
+  setAutolaunch: (on: boolean) => Promise<boolean>
 }
 
 declare global {
@@ -20,4 +22,12 @@ export function quitApp() {
 
 export function minimizeApp() {
   void window.jarvis?.minimize()
+}
+
+export async function getAutolaunch(): Promise<boolean> {
+  return (await window.jarvis?.getAutolaunch()) ?? false
+}
+
+export async function setAutolaunch(on: boolean): Promise<boolean> {
+  return (await window.jarvis?.setAutolaunch(on)) ?? false
 }
