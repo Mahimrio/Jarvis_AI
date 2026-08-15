@@ -305,11 +305,11 @@ export default function Console({ state, hidden, onRequestOpen, onOpenBrowser, o
         greetedRef.current = true // don't talk over the answer
         void send(command)
       } else if (greetedRef.current) {
-        // small delay: the wake recognizer may still be releasing the mic
+        // browser only: the wake recognizer may still be releasing the mic
         window.setTimeout(() => {
           start()
           onStateChange('listening')
-        }, 350)
+        }, isDesktop() ? 0 : 350)
       }
       // bare wake before the first greeting: the visibility effect greets as it opens
     },

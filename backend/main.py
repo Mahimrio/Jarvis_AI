@@ -58,7 +58,12 @@ def _get_whisper():
         if whisper_model is None:
             from faster_whisper import WhisperModel
 
-            whisper_model = WhisperModel(WHISPER_NAME, device="cpu", compute_type="int8")
+            whisper_model = WhisperModel(
+                WHISPER_NAME,
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=max(4, (os.cpu_count() or 8) // 2),
+            )
     return whisper_model
 
 
@@ -233,7 +238,13 @@ async def stt_transcribe(request: Request):
 
     def _run() -> str:
         engine = _get_whisper()
-        segments, _info = engine.transcribe(audio, language="en", beam_size=1, vad_filter=True)
+        segments, _info = engine.transcribe(
+            audio,
+            language="en",
+            beam_size=1,
+            vad_filter=True,
+            condition_on_previous_text=False,
+        )
         return " ".join(s.text.strip() for s in segments).strip()
 
     return {"text": await run_in_threadpool(_run)}

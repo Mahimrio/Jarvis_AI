@@ -168,7 +168,6 @@ export async function recordUtterance({ onDone, onError, onLevel, maxMs = 12000 
 
   mic = await openMic((pcm) => {
     if (done) return
-    chunks.push(pcm)
     let sum = 0
     for (let i = 0; i < pcm.length; i++) {
       const f = pcm[i] / 32768
@@ -176,6 +175,13 @@ export async function recordUtterance({ onDone, onError, onLevel, maxMs = 12000 
     }
     const rms = Math.sqrt(sum / pcm.length)
     const frameMs = (pcm.length / 16000) * 1000
+    if (!speechStarted) {
+      // rolling pre-roll: keep only ~0.5s before speech begins (less silence to transcribe)
+      chunks.push(pcm)
+      if (chunks.length > 2) chunks.shift()
+    } else {
+      chunks.push(pcm)
+    }
     if (rms > 0.035) {
       speechStarted = true
       silentMs = 0
@@ -183,7 +189,7 @@ export async function recordUtterance({ onDone, onError, onLevel, maxMs = 12000 
     } else if (speechStarted) {
       silentMs += frameMs
       onLevel?.(false)
-      if (silentMs > 1400) void finalize(true) // sentence finished
+      if (silentMs > 1000) void finalize(true) // sentence finished
     }
   }, onError)
 
