@@ -29,3 +29,4 @@ dist-ssr
 # debug artifacts
 .debug-shots/
 .tmp-*
+dist-electron/
