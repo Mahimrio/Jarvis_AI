@@ -7,6 +7,7 @@ import Console from './components/Console'
 import BrowserWindow, { type Anchor } from './components/BrowserWindow'
 import Sidebar, { type PanelName } from './components/Sidebar'
 import InfoCards from './components/InfoCards'
+import BootOverlay from './components/BootOverlay'
 import FeedPanel from './components/FeedPanel'
 import MailPanel from './components/MailPanel'
 import MemoryPanel from './components/MemoryPanel'
@@ -69,6 +70,7 @@ export default function App() {
     position: 'center',
   })
   const [consoleOpen, setConsoleOpen] = useState(true)
+  const [booted, setBooted] = useState(false)
   const [panel, setPanel] = useState<PanelName | null>(null)
   const [panelClosing, setPanelClosing] = useState(false)
   const shadowRef = useRef<HTMLDivElement>(null)
@@ -112,8 +114,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, stateNonce.current])
 
-  // boot sequence: HUD assembles on first load
+  // boot sequence: HUD assembles once the boot overlay clears
   useEffect(() => {
+    if (!booted) return
     const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
     tl.from('.hud-top', { y: -64, opacity: 0, duration: 0.6 })
       .from('.sidebar', { x: -72, opacity: 0, duration: 0.5 }, '-=0.32')
@@ -122,7 +125,7 @@ export default function App() {
     return () => {
       tl.revert()
     }
-  }, [])
+  }, [booted])
 
   const executeUICommand = (name: string, args: Record<string, unknown>): string | Promise<string> => {
     switch (name) {
@@ -176,51 +179,56 @@ export default function App() {
       <div className="hex-wrap" aria-hidden>
         <div ref={shadowRef} className="pedestal-glow" />
       </div>
-      <HudBar
-        state={state}
-        onToggleBrowser={() => setBrowser((b) => ({ ...b, open: !b.open }))}
-        onSelectState={setState}
-      />
-      <Sidebar
-        browserOpen={browser.open}
-        consoleOpen={consoleOpen}
-        activePanel={panelClosing ? null : panel}
-        onToggleBrowser={() => setBrowser((b) => ({ ...b, open: !b.open }))}
-        onToggleConsole={() => setConsoleOpen((v) => !v)}
-        onSelectPanel={selectPanel}
-      />
-      <InfoCards />
-      {panel === 'feed' && (
-        <FeedPanel
-          {...panelProps}
-          onOpenLink={(url) => setBrowser({ open: true, url, position: 'center' })}
-        />
-      )}
-      {panel === 'mail' && <MailPanel {...panelProps} />}
-      {panel === 'memory' && <MemoryPanel {...panelProps} />}
-      {panel === 'system' && <SystemPanel {...panelProps} />}
-      {panel === 'network' && <NetworkPanel {...panelProps} />}
-      {panel === 'tools' && <ToolsPanel {...panelProps} executeUICommand={executeUICommand} />}
-      {panel === 'settings' && <SettingsPanel {...panelProps} />}
-      {consoleOpen ? (
-        <Console
-          state={state}
-          onOpenBrowser={(url) => setBrowser({ open: true, url, position: 'center' })}
-          onStateChange={setState}
-          executeUICommand={executeUICommand}
-          onCollapse={() => setConsoleOpen(false)}
-        />
-      ) : (
-        <button type="button" className="console-tab" onClick={() => setConsoleOpen(true)}>
-          ❮ NEURAL LINK
-        </button>
-      )}
-      {browser.open && (
-        <BrowserWindow
-          url={browser.url}
-          position={browser.position}
-          onClose={() => setBrowser((b) => ({ ...b, open: false }))}
-        />
+      {!booted && <BootOverlay onDone={() => setBooted(true)} />}
+      {booted && (
+        <>
+          <HudBar
+            state={state}
+            onToggleBrowser={() => setBrowser((b) => ({ ...b, open: !b.open }))}
+            onSelectState={setState}
+          />
+          <Sidebar
+            browserOpen={browser.open}
+            consoleOpen={consoleOpen}
+            activePanel={panelClosing ? null : panel}
+            onToggleBrowser={() => setBrowser((b) => ({ ...b, open: !b.open }))}
+            onToggleConsole={() => setConsoleOpen((v) => !v)}
+            onSelectPanel={selectPanel}
+          />
+          <InfoCards />
+          {panel === 'feed' && (
+            <FeedPanel
+              {...panelProps}
+              onOpenLink={(url) => setBrowser({ open: true, url, position: 'center' })}
+            />
+          )}
+          {panel === 'mail' && <MailPanel {...panelProps} />}
+          {panel === 'memory' && <MemoryPanel {...panelProps} />}
+          {panel === 'system' && <SystemPanel {...panelProps} />}
+          {panel === 'network' && <NetworkPanel {...panelProps} />}
+          {panel === 'tools' && <ToolsPanel {...panelProps} executeUICommand={executeUICommand} />}
+          {panel === 'settings' && <SettingsPanel {...panelProps} />}
+          {consoleOpen ? (
+            <Console
+              state={state}
+              onOpenBrowser={(url) => setBrowser({ open: true, url, position: 'center' })}
+              onStateChange={setState}
+              executeUICommand={executeUICommand}
+              onCollapse={() => setConsoleOpen(false)}
+            />
+          ) : (
+            <button type="button" className="console-tab" onClick={() => setConsoleOpen(true)}>
+              ❮ NEURAL LINK
+            </button>
+          )}
+          {browser.open && (
+            <BrowserWindow
+              url={browser.url}
+              position={browser.position}
+              onClose={() => setBrowser((b) => ({ ...b, open: false }))}
+            />
+          )}
+        </>
       )}
     </div>
   )

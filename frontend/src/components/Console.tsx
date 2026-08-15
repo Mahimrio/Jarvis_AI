@@ -4,7 +4,7 @@ import gsap from 'gsap'
 import type { OrbState } from './states'
 import { runChat, PROVIDERS, providerAvailable, anyKeyPresent, pickProvider, stripToolLeakage, type ChatMessage, type Provider, type ToolExecutor } from '../lib/llm'
 import { speechSupported, useSpeech } from '../lib/speech'
-import { speak, stopSpeaking, ttsAvailable, whenAudioReady, enqueueSpeech, waitForSpeechIdle } from '../lib/tts'
+import { speak, stopSpeaking, ttsAvailable, whenAudioReady, enqueueSpeech, waitForSpeechIdle, getVoiceSpectrum } from '../lib/tts'
 import { getSettings } from '../lib/settings'
 import { appendChatLog } from '../lib/memlog'
 
@@ -46,6 +46,38 @@ function ChevronIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="9 18 15 12 9 6" />
     </svg>
+  )
+}
+
+// live voice waveform — mirrors the analyser feeding the talking orb
+function VoiceWave() {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const ctx = cv.getContext('2d')!
+    let raf = 0
+    const draw = () => {
+      const bars = getVoiceSpectrum(30)
+      const w = cv.width
+      const h = cv.height
+      const bw = w / bars.length
+      ctx.clearRect(0, 0, w, h)
+      bars.forEach((v, i) => {
+        const bh = Math.max(2, v * (h - 2))
+        ctx.fillStyle = v > 0.03 ? `rgba(255, 150, 60, ${0.55 + v * 0.45})` : 'rgba(255, 140, 46, 0.18)'
+        ctx.fillRect(i * bw + 1.5, (h - bh) / 2, bw - 3, bh)
+      })
+      raf = requestAnimationFrame(draw)
+    }
+    raf = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+  return (
+    <div className="voice-wave-wrap">
+      <canvas ref={ref} className="voice-wave" width={300} height={22} />
+      <span className="voice-wave-label">AUDIO</span>
+    </div>
   )
 }
 
@@ -367,6 +399,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
           </div>
         ))}
       </div>
+      <VoiceWave />
       <div className="console-input-row">
         <button
           type="button"

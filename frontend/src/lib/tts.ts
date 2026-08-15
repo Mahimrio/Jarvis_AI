@@ -31,6 +31,7 @@ export function whenAudioReady(cb: () => void) {
 let audioCtx: AudioContext | null = null
 let analyser: AnalyserNode | null = null
 let levelData: Uint8Array | null = null
+const wired = new WeakSet<HTMLAudioElement>()
 
 function initAnalyser() {
   try {
@@ -42,6 +43,19 @@ function initAnalyser() {
     levelData = new Uint8Array(analyser.frequencyBinCount)
     // fire-and-forget: NEVER await resume(), it can hang forever
     if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => {})
+    // if the context wakes up later, retro-wire whatever is playing right now
+    audioCtx.addEventListener('statechange', () => {
+      if (audioCtx?.state === 'running' && current) wireAnalyser(current)
+    })
+    // keep nudging a suspended context on user gestures until it runs
+    const nudge = () => {
+      if (!audioCtx || audioCtx.state === 'running') {
+        window.removeEventListener('pointerdown', nudge)
+        return
+      }
+      void audioCtx.resume().catch(() => {})
+    }
+    window.addEventListener('pointerdown', nudge)
   } catch {
     audioCtx = null
     analyser = null
@@ -52,8 +66,10 @@ function wireAnalyser(audio: HTMLAudioElement) {
   // only reroute through the context when it is actually running,
   // otherwise a suspended context would silence the element entirely
   if (!audioCtx || !analyser || audioCtx.state !== 'running') return
+  if (wired.has(audio)) return
   try {
     audioCtx.createMediaElementSource(audio).connect(analyser)
+    wired.add(audio)
   } catch {
     /* element keeps playing directly */
   }
@@ -70,6 +86,23 @@ export function getVoiceLevel(): number {
 
 export function isSpeaking(): boolean {
   return current !== null || pumping || queue.length > 0
+}
+
+// frequency bars 0..1 for the console waveform (flat when silent)
+export function getVoiceSpectrum(bars = 28): number[] {
+  if (!analyser || !levelData || !current) return Array(bars).fill(0)
+  analyser.getByteFrequencyData(levelData)
+  const usable = Math.floor(levelData.length * 0.72) // top bins are silence
+  const step = usable / bars
+  const out: number[] = []
+  for (let i = 0; i < bars; i++) {
+    const start = Math.floor(i * step)
+    const end = Math.max(start + 1, Math.floor((i + 1) * step))
+    let sum = 0
+    for (let j = start; j < end; j++) sum += levelData[j]
+    out.push(Math.min(1, sum / (end - start) / 190))
+  }
+  return out
 }
 
 export async function ttsAvailable(): Promise<boolean> {

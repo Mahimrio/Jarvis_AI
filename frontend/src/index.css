@@ -854,6 +854,237 @@ canvas {
   line-height: 1.7;
 }
 
+/* ---- boot sequence ---- */
+.boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at center, rgba(20, 12, 6, 0.55) 0%, rgba(0, 0, 0, 0.96) 75%),
+    #000;
+}
+
+.boot-box {
+  width: 380px;
+}
+
+.boot-mark {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ember-dim);
+  color: var(--ember);
+  font-family: var(--mono);
+  font-size: 20px;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  box-shadow: 0 0 22px var(--ember-faint);
+  animation: feed-pulse 1.2s ease-in-out infinite;
+}
+
+.boot-lines {
+  min-height: 128px;
+}
+
+.boot-line {
+  margin: 0 0 7px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 1.5px;
+  animation: feed-in 0.2s ease-out both;
+}
+
+.boot-line.final {
+  color: var(--ember);
+  text-shadow: 0 0 10px var(--ember-dim);
+}
+
+.boot-cursor {
+  color: var(--ember);
+  font-size: 10px;
+  animation: boot-blink 0.7s step-start infinite;
+}
+
+@keyframes boot-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.boot-progress {
+  margin-top: 16px;
+  height: 2px;
+  background: rgba(255, 140, 46, 0.12);
+}
+
+.boot-progress-fill {
+  height: 100%;
+  background: var(--ember);
+  box-shadow: 0 0 10px var(--ember);
+  transition: width 0.22s ease-out;
+}
+
+/* ---- console voice waveform ---- */
+.voice-wave-wrap {
+  position: relative;
+  padding: 5px 14px 3px;
+  border-top: 1px solid var(--line);
+}
+
+.voice-wave {
+  width: 100%;
+  height: 22px;
+  display: block;
+}
+
+.voice-wave-label {
+  position: absolute;
+  top: 6px;
+  right: 16px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 6.5px;
+  letter-spacing: 2px;
+  opacity: 0.7;
+}
+
+/* ---- de-slop polish ---- */
+/* corner ticks on the uncut panel corners */
+.feed-panel,
+.console {
+  background-image:
+    linear-gradient(var(--ember) 0 0),
+    linear-gradient(var(--ember) 0 0),
+    linear-gradient(var(--ember) 0 0),
+    linear-gradient(var(--ember) 0 0);
+  background-position: top right, top right, bottom left, bottom left;
+  background-size: 16px 1.5px, 1.5px 16px, 16px 1.5px, 1.5px 16px;
+  background-repeat: no-repeat;
+  background-color: rgba(14, 11, 8, 0.95);
+}
+
+/* sidebar: active module gets a hard left indicator bar */
+.side-btn.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  width: 2px;
+  height: 60%;
+  background: var(--ember);
+  box-shadow: 0 0 8px var(--ember);
+}
+
+/* headings get a thin fading underline */
+.feed-head {
+  position: relative;
+}
+
+.feed-head::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 12px;
+  width: 56px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--ember), transparent);
+}
+
+/* tighter, sharper micro-typography */
+.side-label {
+  font-size: 9px;
+  letter-spacing: 1px;
+  opacity: 1;
+}
+
+.side-icon {
+  font-size: 18px;
+}
+
+.side-btn {
+  width: 60px;
+  height: 58px;
+  color: rgba(255, 210, 165, 0.75);
+}
+
+.sidebar {
+  width: 76px;
+}
+
+.feed-panel {
+  left: 90px;
+  width: 320px;
+}
+
+.feed-title {
+  letter-spacing: 0.2px;
+  font-size: 12.5px;
+}
+
+.feed-meta {
+  font-size: 9.5px;
+}
+
+.feed-heading {
+  font-size: 12px;
+}
+
+.feed-chip {
+  font-size: 10px;
+  padding: 5px 10px;
+}
+
+.feed-btn {
+  font-size: 10px;
+}
+
+.stat-label {
+  font-size: 9.5px;
+}
+
+.stat-value {
+  letter-spacing: 0.4px;
+  font-size: 11.5px;
+}
+
+.mem-q,
+.mem-a {
+  font-size: 11.5px;
+}
+
+.mail-steps {
+  font-size: 10.5px;
+}
+
+.settings-group {
+  font-size: 10px;
+}
+
+.settings-note {
+  font-size: 9.5px;
+}
+
+.feed-empty {
+  font-size: 11px;
+}
+
+/* console messages: jarvis replies carry an ember spine */
+.console-msg.jarvis p {
+  border-left: 2px solid var(--ember-dim);
+  padding-left: 9px;
+}
+
+.console-msg.user p {
+  border-right: 2px solid rgba(255, 200, 150, 0.25);
+  padding-right: 9px;
+}
+
 /* ---- blob floor shadow ---- */
 .hex-wrap {
   position: absolute;
