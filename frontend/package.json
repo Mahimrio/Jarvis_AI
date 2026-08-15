@@ -1,14 +1,41 @@
 {
-  "name": "frontend",
+  "name": "jarvis",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "main": "dist-electron/main.js",
+  "description": "JARVIS — personal voice AI assistant",
+  "author": "Mahim Abdullah Rianto",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "dist": "tsc -b && vite build && electron-builder --win",
     "lint": "oxlint",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.mahimrio.jarvis",
+    "productName": "Jarvis",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "deleteAppDataOnUninstall": true,
+      "shortcutName": "Jarvis"
+    }
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",
@@ -26,6 +53,7 @@
     "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^6.0.4",
     "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",

@@ -114,7 +114,7 @@ export async function startWakeStream({ onWake, onError }: WakeOptions): Promise
     // mild fixed gain, no adaptive boost: openWakeWord fails on clipped audio
     mic = await openMic(
       (pcm) => {
-        if (!stopped && ws.readyState === WebSocket.OPEN && !isSpeaking()) ws.send(pcm.buffer)
+        if (!stopped && ws.readyState === WebSocket.OPEN && !isSpeaking()) ws.send(pcm.buffer as ArrayBuffer)
       },
       onError,
       { gain: 2.0, adaptive: false },

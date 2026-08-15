@@ -22,15 +22,37 @@ let spawnedBackend = false
 const repoRoot = () =>
   app.isPackaged ? path.dirname(app.getPath('exe')) : path.join(__dirname, '..', '..')
 
+// the packaged exe can live anywhere — locate the Python backend by candidates:
+// env var → backend-path.txt next to the exe → backend/ next to the exe → dev repo
+function findBackendDir(): string | null {
+  const exeDir = path.dirname(app.getPath('exe'))
+  const candidates: string[] = []
+  if (process.env.JARVIS_BACKEND) candidates.push(process.env.JARVIS_BACKEND)
+  try {
+    const hint = path.join(exeDir, 'backend-path.txt')
+    if (fs.existsSync(hint)) candidates.push(fs.readFileSync(hint, 'utf8').trim())
+  } catch {
+    /* unreadable hint file */
+  }
+  candidates.push(
+    path.join(exeDir, 'backend'),
+    path.join(__dirname, '..', '..', 'backend'),
+    'F:\\Personal AI assistant\\Jarvis\\backend', // this machine's dev checkout
+  )
+  for (const dir of candidates) {
+    if (dir && fs.existsSync(path.join(dir, '.venv', 'Scripts', 'uvicorn.exe'))) return dir
+  }
+  return null
+}
+
 function ensureBackend() {
   const probe = http.get(`http://127.0.0.1:${BACKEND_PORT}/health`, () => {
     probe.destroy() // already running (dev terminal) — don't double-spawn
   })
   probe.on('error', () => {
-    const backendDir = path.join(repoRoot(), 'backend')
-    const uvicorn = path.join(backendDir, '.venv', 'Scripts', 'uvicorn.exe')
-    if (!fs.existsSync(uvicorn)) return
-    backend = spawn(uvicorn, ['main:app', '--port', String(BACKEND_PORT)], {
+    const backendDir = findBackendDir()
+    if (!backendDir) return
+    backend = spawn(path.join(backendDir, '.venv', 'Scripts', 'uvicorn.exe'), ['main:app', '--port', String(BACKEND_PORT)], {
       cwd: backendDir,
       stdio: 'ignore',
       windowsHide: true,

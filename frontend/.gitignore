@@ -30,3 +30,6 @@ dist-ssr
 .debug-shots/
 .tmp-*
 dist-electron/
+
+# packaged builds
+release/

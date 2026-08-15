@@ -36,7 +36,7 @@ export function forceAudioUnlock() {
 // ---- live voice amplitude (drives the talking-state visualizer) ----
 let audioCtx: AudioContext | null = null
 let analyser: AnalyserNode | null = null
-let levelData: Uint8Array | null = null
+let levelData: Uint8Array<ArrayBuffer> | null = null
 const wired = new WeakSet<HTMLAudioElement>()
 
 function initAnalyser() {
