@@ -54,6 +54,24 @@ export default function SettingsPanel(props: Props) {
         </button>
       </div>
 
+      <p className="settings-group">BROWSER WINDOWS</p>
+      <div className="settings-chips">
+        <button
+          type="button"
+          className={`feed-chip${settings.browserMode === 'real' ? ' active' : ''}`}
+          onClick={() => update('browserMode', 'real')}
+        >
+          REAL CHROME
+        </button>
+        <button
+          type="button"
+          className={`feed-chip${settings.browserMode === 'embedded' ? ' active' : ''}`}
+          onClick={() => update('browserMode', 'embedded')}
+        >
+          EMBEDDED
+        </button>
+      </div>
+
       <p className="settings-group">DEFAULT MODEL</p>
       <div className="settings-chips">
         <button

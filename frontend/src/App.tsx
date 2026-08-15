@@ -18,6 +18,8 @@ import SettingsPanel from './components/SettingsPanel'
 import { isSpeaking } from './lib/tts'
 import { addFeedItem, initFeedSources } from './lib/feed'
 import { mailSummaryForChat } from './lib/mail'
+import { getSettings } from './lib/settings'
+import { openRealBrowser, moveRealBrowser, closeRealBrowser } from './lib/realBrowser'
 import { STATES, type OrbState } from './components/states'
 
 const HOME = 'https://www.google.com/webhp?igu=1'
@@ -33,7 +35,7 @@ function normalizeAnchor(value: unknown): Anchor {
   return (ANCHORS as string[]).includes(v) ? (v as Anchor) : 'center'
 }
 
-function resolveUrl(args: Record<string, unknown>): string {
+function resolveUrl(args: Record<string, unknown>, real = false): string {
   const rawUrl = typeof args.url === 'string' ? args.url.trim() : ''
   const rawSite = typeof args.site === 'string' ? args.site.trim() : ''
   const query = typeof args.query === 'string' ? args.query.trim() : ''
@@ -43,12 +45,19 @@ function resolveUrl(args: Record<string, unknown>): string {
   const direct = rawUrl || (/^https?:\/\/|\.[a-z]{2,}/i.test(rawSite) ? rawSite : '')
   if (direct) {
     const full = /^https?:\/\//i.test(direct) ? direct : `https://${direct}`
-    if (/youtube\.com|youtu\.be/i.test(full)) return YT_HOME
+    if (!real && /youtube\.com|youtu\.be/i.test(full)) return YT_HOME
     return full
   }
 
   const site = rawSite.toLowerCase()
   if (site.includes('portfolio')) return PORTFOLIO
+  if (real) {
+    // real Chrome windows get normal URLs — no iframe workarounds
+    if (site.includes('youtube')) return query ? `https://www.youtube.com/results?search_query=${enc}` : 'https://www.youtube.com'
+    if (site.includes('wikipedia')) return query ? `https://en.wikipedia.org/wiki/Special:Search?search=${enc}` : 'https://www.wikipedia.org'
+    if (/portfolio/i.test(query)) return PORTFOLIO
+    return query ? `https://www.google.com/search?q=${enc}` : 'https://www.google.com'
+  }
   if (site.includes('youtube')) return query ? `https://www.google.com/search?igu=1&q=${enc}+youtube` : YT_HOME
   if (site.includes('wikipedia')) return query ? `https://en.wikipedia.org/wiki/Special:Search?search=${enc}` : 'https://www.wikipedia.org'
   if (/portfolio/i.test(query)) return PORTFOLIO
@@ -131,20 +140,24 @@ export default function App() {
   }, [booted])
 
   const executeUICommand = (name: string, args: Record<string, unknown>): string | Promise<string> => {
+    const realChrome = getSettings().browserMode === 'real'
     switch (name) {
       case 'open_browser': {
-        const url = resolveUrl(args)
+        const url = resolveUrl(args, realChrome)
         const position = normalizeAnchor(args.position)
+        if (realChrome) return openRealBrowser(url, position)
         setBrowser({ open: true, url, position })
         return `Browser window opened at ${position} showing ${url}`
       }
       case 'move_browser': {
-        if (!browser.open) return 'No browser window is open.'
         const position = normalizeAnchor(args.position)
+        if (realChrome) return moveRealBrowser(position)
+        if (!browser.open) return 'No browser window is open.'
         setBrowser((b) => ({ ...b, position }))
         return `Browser window moved to ${position}`
       }
       case 'close_browser':
+        if (realChrome) return closeRealBrowser()
         setBrowser((b) => ({ ...b, open: false }))
         return 'Browser window closed.'
       case 'set_protocol_state': {

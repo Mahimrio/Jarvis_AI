@@ -3,6 +3,7 @@ export interface JarvisSettings {
   defaultMode: 'auto' | string
   newsCats: string[]
   wakeOn: boolean
+  browserMode: 'embedded' | 'real'
 }
 
 const KEY = 'jarvis-settings'
@@ -13,6 +14,7 @@ const DEFAULTS: JarvisSettings = {
   defaultMode: 'auto',
   newsCats: [...ALL_NEWS_CATS],
   wakeOn: true,
+  browserMode: 'real',
 }
 
 export function getSettings(): JarvisSettings {
