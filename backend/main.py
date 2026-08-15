@@ -29,12 +29,9 @@ if _ENV_FILE.exists():
 VOICE_DIR = Path(__file__).parent / "voice"
 VOICE_MP3 = VOICE_DIR / "jarvis-clone.mp3"
 VOICE_CACHE = VOICE_DIR / "jarvis-clone.safetensors"
-# prefer the larger, more accurate model when present
-_VOSK_CANDIDATES = [
-    Path(__file__).parent / "models" / "vosk-en-lgraph",
-    Path(__file__).parent / "models" / "vosk-small-en",
-]
-VOSK_DIR = next((p for p in _VOSK_CANDIDATES if p.exists()), _VOSK_CANDIDATES[-1])
+# big model for command accuracy, small model for the cheap always-on wake stream
+VOSK_BIG = Path(__file__).parent / "models" / "vosk-en-lgraph"
+VOSK_SMALL = Path(__file__).parent / "models" / "vosk-small-en"
 
 app = FastAPI(title="Jarvis Voice Server")
 app.add_middleware(
@@ -49,11 +46,12 @@ model: TTSModel | None = None
 voice_state = None
 generate_lock = threading.Lock()
 vosk_model = None
+vosk_wake_model = None
 
 
 @app.on_event("startup")
 def load_model() -> None:
-    global model, voice_state, vosk_model
+    global model, voice_state, vosk_model, vosk_wake_model
     model = TTSModel.load_model()
     if VOICE_CACHE.exists():
         voice_state = model.get_state_for_audio_prompt(str(VOICE_CACHE))
@@ -61,10 +59,16 @@ def load_model() -> None:
         # first run: clone the voice from the mp3, then cache for fast startups
         voice_state = model.get_state_for_audio_prompt(str(VOICE_MP3))
         export_model_state(voice_state, str(VOICE_CACHE))
-    if VOSK_DIR.exists():
-        from vosk import Model as VoskModel
+    from vosk import Model as VoskModel
 
-        vosk_model = VoskModel(str(VOSK_DIR))
+    if VOSK_BIG.exists():
+        vosk_model = VoskModel(str(VOSK_BIG))
+    if VOSK_SMALL.exists():
+        vosk_wake_model = VoskModel(str(VOSK_SMALL))
+    if vosk_model is None:
+        vosk_model = vosk_wake_model
+    if vosk_wake_model is None:
+        vosk_wake_model = vosk_model
 
 
 class TTSRequest(BaseModel):
@@ -126,21 +130,31 @@ def tts_stream(req: TTSRequest):
     )
 
 
+_stt_sessions = 0
+
+
 @app.websocket("/stt/ws")
-async def stt_ws(ws: WebSocket):
+async def stt_ws(ws: WebSocket, mode: str = "command"):
     """Streaming speech-to-text: client sends 16kHz mono 16-bit PCM chunks,
-    server answers with partial/final transcripts (offline vosk)."""
+    server answers with partial/final transcripts (offline vosk).
+    mode=wake uses the light model so the always-on stream stays cheap."""
+    global _stt_sessions
     await ws.accept()
-    if vosk_model is None:
-        await ws.close(code=1011)
+    engine = vosk_wake_model if mode == "wake" else vosk_model
+    if engine is None or _stt_sessions >= 3:  # stale reconnects must not pile up CPU
+        await ws.close(code=1013)
         return
+    from starlette.concurrency import run_in_threadpool
     from vosk import KaldiRecognizer
 
-    rec = KaldiRecognizer(vosk_model, 16000)
+    rec = KaldiRecognizer(engine, 16000)
+    _stt_sessions += 1
     try:
         while True:
             data = await ws.receive_bytes()
-            if rec.AcceptWaveform(data):
+            # decode off the event loop so TTS requests never wait behind recognition
+            accepted = await run_in_threadpool(rec.AcceptWaveform, data)
+            if accepted:
                 text = json.loads(rec.Result()).get("text", "")
                 if text:
                     await ws.send_json({"type": "final", "text": text})
@@ -150,6 +164,8 @@ async def stt_ws(ws: WebSocket):
                     await ws.send_json({"type": "partial", "text": partial})
     except WebSocketDisconnect:
         pass
+    finally:
+        _stt_sessions -= 1
 
 
 @app.get("/search")
@@ -182,6 +198,7 @@ def web_search(q: str, max_results: int = 5):
 # ---- Gmail via IMAP (read-only, app password from backend/.env) ----------
 
 IMAP_HOST = "imap.gmail.com"
+_mail_fail_until = 0.0  # cooldown after a failed login so we don't hammer Google
 
 
 def _mail_creds() -> tuple[str, str] | None:
@@ -191,14 +208,20 @@ def _mail_creds() -> tuple[str, str] | None:
 
 
 def _imap() -> imaplib.IMAP4_SSL:
+    global _mail_fail_until
+    import time as _time
+
     creds = _mail_creds()
     if not creds:
         raise HTTPException(status_code=503, detail="Mail not configured")
+    if _time.time() < _mail_fail_until:
+        raise HTTPException(status_code=503, detail="Mail login failing — retrying later")
     try:
-        conn = imaplib.IMAP4_SSL(IMAP_HOST, timeout=15)
+        conn = imaplib.IMAP4_SSL(IMAP_HOST, timeout=10)
         conn.login(*creds)
         return conn
-    except imaplib.IMAP4.error as exc:
+    except (imaplib.IMAP4.error, OSError) as exc:
+        _mail_fail_until = _time.time() + 600  # 10 min cooldown
         raise HTTPException(status_code=502, detail=f"IMAP login failed: {exc}") from exc
 
 

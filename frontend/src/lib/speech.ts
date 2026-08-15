@@ -183,6 +183,7 @@ export function useWakeWord({ enabled, onWake, onBlocked }: WakeOptions) {
 
     void (async () => {
       session = await startNativeStt({
+        mode: 'wake', // light model — the always-on stream must stay cheap
         onPartial: (t) => check(t, false),
         onFinal: (t) => check(t, true),
         onError: () => {
