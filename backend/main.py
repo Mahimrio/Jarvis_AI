@@ -207,6 +207,7 @@ async def wake_ws(ws: WebSocket):
 
     buf = np.zeros(0, dtype=np.int16)
     cooldown_until = 0.0
+    threshold = float(os.environ.get("JARVIS_WAKE_THRESHOLD", "0.4"))
     import time as _time
 
     try:
@@ -216,7 +217,10 @@ async def wake_ws(ws: WebSocket):
             while len(buf) >= 1280:  # 80ms frames, as the detector expects
                 frame, buf = buf[:1280], buf[1280:]
                 scores = await run_in_threadpool(detector.predict, frame)
-                if max(scores.values()) > 0.5 and _time.time() > cooldown_until:
+                s = max(scores.values())
+                if s > 0.25:  # near-miss visibility while tuning sensitivity
+                    print(f"[wake] score={s:.2f}", flush=True)
+                if s >= threshold and _time.time() > cooldown_until:
                     cooldown_until = _time.time() + 2.0
                     detector.reset()
                     buf = np.zeros(0, dtype=np.int16)

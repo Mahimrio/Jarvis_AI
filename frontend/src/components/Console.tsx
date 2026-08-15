@@ -153,14 +153,6 @@ export default function Console({ state, hidden, onRequestOpen, onOpenBrowser, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hidden, ttsOnline])
 
-  // desktop shell: no wake word yet — open and greet on boot once the voice is ready
-  useEffect(() => {
-    if (!isDesktop() || greetedRef.current || !ttsOnline) return
-    forceAudioUnlock() // Electron runs with autoplay enabled
-    onRequestOpen()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ttsOnline])
-
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [messages])

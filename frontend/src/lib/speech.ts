@@ -175,7 +175,7 @@ export function useWakeWord({ enabled, onWake, onBlocked }: WakeOptions) {
           if (isSpeaking()) return
           if (Date.now() - lastFire.current < 1500) return
           lastFire.current = Date.now()
-          session?.stop()
+          // keep the stream alive — it tears down via the `enabled` flag while listening
           cbRef.current.onWake(null)
         },
         onError: () => {

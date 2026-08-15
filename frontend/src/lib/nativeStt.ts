@@ -10,8 +10,13 @@ interface MicPipeline {
   close: () => void
 }
 
-// shared mic capture: 16kHz mono int16 frames with gain + adaptive normalization
-async function openMic(onFrame: (pcm: Int16Array) => void, onError?: (msg: string) => void): Promise<MicPipeline | null> {
+// shared mic capture: 16kHz mono int16 frames with gain + adaptive normalization.
+// The wake detector needs clean (unclipped) audio, so it opts out of the boost chain.
+async function openMic(
+  onFrame: (pcm: Int16Array) => void,
+  onError?: (msg: string) => void,
+  opts?: { gain?: number; adaptive?: boolean },
+): Promise<MicPipeline | null> {
   let stream: MediaStream
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -26,7 +31,8 @@ async function openMic(onFrame: (pcm: Int16Array) => void, onError?: (msg: strin
   const ctx = new AudioContext({ sampleRate: 16000 })
   const source = ctx.createMediaStreamSource(stream)
   const gain = ctx.createGain()
-  gain.gain.value = 4.0
+  gain.gain.value = opts?.gain ?? 4.0
+  const adaptive = opts?.adaptive ?? true
   const proc = ctx.createScriptProcessor(4096, 1, 1)
 
   let closed = false
@@ -38,7 +44,7 @@ async function openMic(onFrame: (pcm: Int16Array) => void, onError?: (msg: strin
     for (let i = 0; i < f32.length; i++) sum += f32[i] * f32[i]
     const rms = Math.sqrt(sum / f32.length)
     if (rms > 0.004) ema = ema * 0.85 + rms * 0.15
-    const boost = Math.min(12, Math.max(1, 0.25 / Math.max(ema, 0.008)))
+    const boost = adaptive ? Math.min(12, Math.max(1, 0.25 / Math.max(ema, 0.008))) : 1
     const i16 = new Int16Array(f32.length)
     for (let i = 0; i < f32.length; i++) {
       const s = Math.max(-1, Math.min(1, f32[i] * boost))
@@ -105,9 +111,14 @@ export async function startWakeStream({ onWake, onError }: WakeOptions): Promise
     }
   }
   ws.onopen = async () => {
-    mic = await openMic((pcm) => {
-      if (!stopped && ws.readyState === WebSocket.OPEN && !isSpeaking()) ws.send(pcm.buffer)
-    }, onError)
+    // mild fixed gain, no adaptive boost: openWakeWord fails on clipped audio
+    mic = await openMic(
+      (pcm) => {
+        if (!stopped && ws.readyState === WebSocket.OPEN && !isSpeaking()) ws.send(pcm.buffer)
+      },
+      onError,
+      { gain: 2.0, adaptive: false },
+    )
     if (!mic || stopped) stop()
   }
 
