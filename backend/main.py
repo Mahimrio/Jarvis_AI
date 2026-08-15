@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import scipy.io.wavfile
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -47,6 +47,19 @@ voice_state = None
 generate_lock = threading.Lock()
 vosk_model = None
 vosk_wake_model = None
+whisper_model = None
+_whisper_lock = threading.Lock()
+WHISPER_NAME = os.environ.get("JARVIS_WHISPER_MODEL", "small.en")
+
+
+def _get_whisper():
+    global whisper_model
+    with _whisper_lock:
+        if whisper_model is None:
+            from faster_whisper import WhisperModel
+
+            whisper_model = WhisperModel(WHISPER_NAME, device="cpu", compute_type="int8")
+    return whisper_model
 
 
 @app.on_event("startup")
@@ -69,6 +82,8 @@ def load_model() -> None:
         vosk_model = vosk_wake_model
     if vosk_wake_model is None:
         vosk_wake_model = vosk_model
+    # warm whisper in the background so the first command isn't slow
+    threading.Thread(target=_get_whisper, daemon=True).start()
 
 
 class TTSRequest(BaseModel):
@@ -166,6 +181,62 @@ async def stt_ws(ws: WebSocket, mode: str = "command"):
         pass
     finally:
         _stt_sessions -= 1
+
+
+@app.websocket("/wake/ws")
+async def wake_ws(ws: WebSocket):
+    """Dedicated hotword stream: 16kHz int16 PCM in, {"type":"wake"} out when
+    the pretrained openWakeWord 'hey jarvis' detector fires."""
+    await ws.accept()
+    from starlette.concurrency import run_in_threadpool
+
+    try:
+        from openwakeword.model import Model as OWWModel
+
+        detector = await run_in_threadpool(
+            lambda: OWWModel(wakeword_models=["hey_jarvis_v0.1"], inference_framework="onnx")
+        )
+    except Exception:
+        await ws.close(code=1011)
+        return
+
+    buf = np.zeros(0, dtype=np.int16)
+    cooldown_until = 0.0
+    import time as _time
+
+    try:
+        while True:
+            data = await ws.receive_bytes()
+            buf = np.concatenate([buf, np.frombuffer(data, dtype=np.int16)])
+            while len(buf) >= 1280:  # 80ms frames, as the detector expects
+                frame, buf = buf[:1280], buf[1280:]
+                scores = await run_in_threadpool(detector.predict, frame)
+                if max(scores.values()) > 0.5 and _time.time() > cooldown_until:
+                    cooldown_until = _time.time() + 2.0
+                    detector.reset()
+                    buf = np.zeros(0, dtype=np.int16)
+                    await ws.send_json({"type": "wake"})
+                    break
+    except WebSocketDisconnect:
+        pass
+
+
+@app.post("/stt/transcribe")
+async def stt_transcribe(request: Request):
+    """Whole-utterance transcription (whisper): body is raw 16kHz mono int16 PCM."""
+    from starlette.concurrency import run_in_threadpool
+
+    body = await request.body()
+    if len(body) < 8000:  # under ~0.25s of audio
+        return {"text": ""}
+    audio = np.frombuffer(body, dtype=np.int16).astype(np.float32) / 32768.0
+
+    def _run() -> str:
+        engine = _get_whisper()
+        segments, _info = engine.transcribe(audio, language="en", beam_size=1, vad_filter=True)
+        return " ".join(s.text.strip() for s in segments).strip()
+
+    return {"text": await run_in_threadpool(_run)}
 
 
 @app.get("/search")

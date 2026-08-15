@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { isSpeaking } from './tts'
 import { isDesktop } from './os'
-import { startNativeStt, type NativeSttSession } from './nativeStt'
+import { startWakeStream, recordUtterance, type NativeSttSession, type RecordSession } from './nativeStt'
 
 interface SpeechRecognitionEventLike {
   resultIndex: number
@@ -36,7 +36,7 @@ export function useSpeech({ onFinal, onEnd }: Options) {
   const [interim, setInterim] = useState('')
   const [error, setError] = useState<string | null>(null)
   const recRef = useRef<SpeechRecognitionLike | null>(null)
-  const nativeRef = useRef<NativeSttSession | null>(null)
+  const nativeRef = useRef<RecordSession | null>(null)
   const hadFinal = useRef(false)
   const cbRef = useRef({ onFinal, onEnd })
   cbRef.current = { onFinal, onEnd }
@@ -44,7 +44,7 @@ export function useSpeech({ onFinal, onEnd }: Options) {
   useEffect(
     () => () => {
       recRef.current?.abort()
-      nativeRef.current?.stop()
+      nativeRef.current?.cancel()
     },
     [],
   )
@@ -53,32 +53,22 @@ export function useSpeech({ onFinal, onEnd }: Options) {
     setError(null)
     hadFinal.current = false
     setListening(true)
-    let idleTimer: number | undefined
-    const finish = () => {
-      clearTimeout(idleTimer)
-      nativeRef.current?.stop()
-      nativeRef.current = null
-      setListening(false)
-      setInterim('')
-      cbRef.current.onEnd(hadFinal.current)
-    }
-    // single-utterance semantics: stop after the first final, or 8s of silence
-    idleTimer = window.setTimeout(finish, 8000)
-    nativeRef.current = await startNativeStt({
-      onPartial: (t) => {
-        setInterim(t)
-        clearTimeout(idleTimer)
-        idleTimer = window.setTimeout(finish, 4000)
+    setInterim('Listening… speak now')
+    nativeRef.current = await recordUtterance({
+      onLevel: (active) => {
+        if (active) setInterim('Listening…')
       },
-      onFinal: (t) => {
-        hadFinal.current = true
-        cbRef.current.onFinal(t.trim())
-        finish()
+      onDone: (text) => {
+        nativeRef.current = null
+        setListening(false)
+        setInterim('')
+        if (text) {
+          hadFinal.current = true
+          cbRef.current.onFinal(text)
+        }
+        cbRef.current.onEnd(hadFinal.current)
       },
-      onError: (msg) => {
-        setError(msg)
-        finish()
-      },
+      onError: (msg) => setError(msg),
     })
   }
 
@@ -126,18 +116,27 @@ export function useSpeech({ onFinal, onEnd }: Options) {
       cbRef.current.onEnd(hadFinal.current)
     }
     recRef.current = rec
-    rec.start()
+    // another session may still be shutting down (wake handoff) — retry once
+    try {
+      rec.start()
+    } catch {
+      window.setTimeout(() => {
+        try {
+          rec.start()
+        } catch {
+          setError('Voice input busy — try again.')
+          setListening(false)
+          return
+        }
+      }, 350)
+    }
     setListening(true)
   }
 
   const stop = () => {
     recRef.current?.stop()
     if (nativeRef.current) {
-      nativeRef.current.stop()
-      nativeRef.current = null
-      setListening(false)
-      setInterim('')
-      cbRef.current.onEnd(hadFinal.current)
+      nativeRef.current.finish() // transcribe what was captured so far
     }
   }
 
@@ -162,39 +161,34 @@ export function useWakeWord({ enabled, onWake, onBlocked }: WakeOptions) {
   const blocked = useRef(false)
   const netFails = useRef(0)
 
-  // desktop: continuous native vosk stream watching for the wake word
+  // desktop: dedicated openWakeWord hotword stream (auto-reconnects if the backend restarts)
   useEffect(() => {
     if (!enabled || !isDesktop() || blocked.current) return
     let disposed = false
     let session: NativeSttSession | null = null
+    let retryTimer: number | undefined
 
-    const check = (text: string, isFinal: boolean) => {
-      if (isSpeaking()) return
-      if (Date.now() - lastFire.current < 1500) return
-      const m = WAKE_RE.exec(text)
-      if (!m) return
-      const trailing = (m[1] ?? '').trim()
-      if (isFinal || trailing.length === 0) {
-        lastFire.current = Date.now()
-        session?.stop()
-        cbRef.current.onWake(trailing.length > 1 ? trailing : null)
-      }
-    }
-
-    void (async () => {
-      session = await startNativeStt({
-        mode: 'wake', // light model — the always-on stream must stay cheap
-        onPartial: (t) => check(t, false),
-        onFinal: (t) => check(t, true),
+    const spin = async () => {
+      if (disposed) return
+      session = await startWakeStream({
+        onWake: () => {
+          if (isSpeaking()) return
+          if (Date.now() - lastFire.current < 1500) return
+          lastFire.current = Date.now()
+          session?.stop()
+          cbRef.current.onWake(null)
+        },
         onError: () => {
-          // backend not up yet — effect re-runs on next enabled flip; stay quiet
+          if (!disposed) retryTimer = window.setTimeout(spin, 4000)
         },
       })
       if (disposed) session.stop()
-    })()
+    }
 
+    void spin()
     return () => {
       disposed = true
+      clearTimeout(retryTimer)
       session?.stop()
     }
   }, [enabled])
