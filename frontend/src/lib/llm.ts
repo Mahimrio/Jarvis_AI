@@ -69,7 +69,7 @@ const firstReady = () => PROVIDERS.find(providerAvailable) ?? PROVIDERS[0]
 
 // route each message to the best available brain
 const FRESH_RE = /\b(latest|current|today|tonight|now|news|recent|weather|price|stock|score|happening|trend|202[4-9]|screen|see|look at|image|picture|photo|vision|screenshot|diagram)\b/i
-const ACTION_RE = /\b(open|close|move|show|hide|go to|navigate|search|play|youtube|wikipedia|browser|window|protocol|breathing|listening|shaping|corner|top[- ]?right|top[- ]?left|bottom|note|remember|remind|mail|email|inbox)\b/i
+const ACTION_RE = /\b(open|close|move|show|hide|go to|navigate|search|play|youtube|wikipedia|portfolio|browser|window|protocol|breathing|listening|shaping|corner|top[- ]?right|top[- ]?left|bottom|note|remember|remind|mail|email|inbox)\b/i
 const HEAVY_RE = /\b(explain|analy[sz]e|why|how (do|does|to|can)|code|write|program|debug|refactor|compare|summar|plan|reason|solve|calcul|essay|story|detailed?|architect|design)\b/i
 
 export function pickProvider(text: string): Provider {
@@ -97,6 +97,7 @@ developed by Junior Developer Mahim Abdullah Rianto. Otherwise just answer the r
 Keep replies concise (1-4 sentences unless asked for detail) and technically sharp. You live inside a
 futuristic HUD web interface which you can control with your tools: an embedded browser window you can
 open at any corner of the screen, move, or close, and the visual protocol state of your particle core.
+When sir asks to open his portfolio, call open_browser with site "portfolio".
 CRITICAL: to perform any on-screen action you MUST call the matching tool. Never claim you opened, moved,
 searched, or closed something unless you actually called the tool to do it — do not just describe it.
 Call the tool first; a confirmation message is generated for you afterward.`
@@ -113,8 +114,8 @@ const TOOLS = [
         properties: {
           site: {
             type: 'string',
-            enum: ['google', 'youtube', 'wikipedia'],
-            description: 'Which site to open. Default google.',
+            enum: ['google', 'youtube', 'wikipedia', 'portfolio'],
+            description: "Which site to open. 'portfolio' = sir's own portfolio website. Default google.",
           },
           query: { type: 'string', description: 'Search terms, if the user wants to search something.' },
           url: { type: 'string', description: 'Direct URL to open instead of site/query.' },

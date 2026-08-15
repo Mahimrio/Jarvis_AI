@@ -22,6 +22,7 @@ import { STATES, type OrbState } from './components/states'
 
 const HOME = 'https://www.google.com/webhp?igu=1'
 const YT_HOME = 'https://www.youtube.com/embed/videoseries?list=UUsooa4yRKGN_zEE8iknghZA'
+const PORTFOLIO = 'https://mahimrio.github.io/My_Portfolio/'
 
 const ANCHORS: Anchor[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'center']
 
@@ -47,8 +48,10 @@ function resolveUrl(args: Record<string, unknown>): string {
   }
 
   const site = rawSite.toLowerCase()
+  if (site.includes('portfolio')) return PORTFOLIO
   if (site.includes('youtube')) return query ? `https://www.google.com/search?igu=1&q=${enc}+youtube` : YT_HOME
   if (site.includes('wikipedia')) return query ? `https://en.wikipedia.org/wiki/Special:Search?search=${enc}` : 'https://www.wikipedia.org'
+  if (/portfolio/i.test(query)) return PORTFOLIO
   return query ? `https://www.google.com/search?igu=1&q=${enc}` : HOME
 }
 
