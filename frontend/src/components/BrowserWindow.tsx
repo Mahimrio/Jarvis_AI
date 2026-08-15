@@ -154,6 +154,15 @@ export default function BrowserWindow({ url, position, onClose }: Props) {
             {name}
           </button>
         ))}
+        <button
+          type="button"
+          className="browser-btn"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => window.open(src, '_blank', 'noopener')}
+          title="Open in a real browser tab (for sites that refuse embedding)"
+        >
+          ↗
+        </button>
         <button type="button" className="browser-btn close" onClick={close} title="Close">
           ✕
         </button>

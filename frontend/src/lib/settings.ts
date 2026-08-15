@@ -2,6 +2,7 @@ export interface JarvisSettings {
   voiceOn: boolean
   defaultMode: 'auto' | string
   newsCats: string[]
+  wakeOn: boolean
 }
 
 const KEY = 'jarvis-settings'
@@ -11,6 +12,7 @@ const DEFAULTS: JarvisSettings = {
   voiceOn: true,
   defaultMode: 'auto',
   newsCats: [...ALL_NEWS_CATS],
+  wakeOn: true,
 }
 
 export function getSettings(): JarvisSettings {

@@ -44,6 +44,16 @@ export default function SettingsPanel(props: Props) {
         </button>
       </div>
 
+      <p className="settings-group">"HEY JARVIS" WAKE WORD</p>
+      <div className="settings-chips">
+        <button type="button" className={`feed-chip${settings.wakeOn ? ' active' : ''}`} onClick={() => update('wakeOn', true)}>
+          ON
+        </button>
+        <button type="button" className={`feed-chip${!settings.wakeOn ? ' active' : ''}`} onClick={() => update('wakeOn', false)}>
+          OFF
+        </button>
+      </div>
+
       <p className="settings-group">DEFAULT MODEL</p>
       <div className="settings-chips">
         <button

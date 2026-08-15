@@ -72,7 +72,7 @@ export default function App() {
     url: HOME,
     position: 'center',
   })
-  const [consoleOpen, setConsoleOpen] = useState(true)
+  const [consoleOpen, setConsoleOpen] = useState(false)
   const [booted, setBooted] = useState(false)
   const [panel, setPanel] = useState<PanelName | null>(null)
   const [panelClosing, setPanelClosing] = useState(false)
@@ -211,15 +211,16 @@ export default function App() {
           {panel === 'network' && <NetworkPanel {...panelProps} />}
           {panel === 'tools' && <ToolsPanel {...panelProps} executeUICommand={executeUICommand} />}
           {panel === 'settings' && <SettingsPanel {...panelProps} />}
-          {consoleOpen ? (
-            <Console
-              state={state}
-              onOpenBrowser={(url) => setBrowser({ open: true, url, position: 'center' })}
-              onStateChange={setState}
-              executeUICommand={executeUICommand}
-              onCollapse={() => setConsoleOpen(false)}
-            />
-          ) : (
+          <Console
+            state={state}
+            hidden={!consoleOpen}
+            onRequestOpen={() => setConsoleOpen(true)}
+            onOpenBrowser={(url) => setBrowser({ open: true, url, position: 'center' })}
+            onStateChange={setState}
+            executeUICommand={executeUICommand}
+            onCollapse={() => setConsoleOpen(false)}
+          />
+          {!consoleOpen && (
             <button type="button" className="console-tab" onClick={() => setConsoleOpen(true)}>
               ❮ NEURAL LINK
             </button>

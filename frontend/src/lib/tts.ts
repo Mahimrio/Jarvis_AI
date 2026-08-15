@@ -27,6 +27,12 @@ export function whenAudioReady(cb: () => void) {
   else readyCallbacks.push(cb)
 }
 
+// wake-word activation isn't a browser "gesture" — but an active mic capture
+// grants autoplay, so unlock manually when "hey Jarvis" fires
+export function forceAudioUnlock() {
+  unlockAudio()
+}
+
 // ---- live voice amplitude (drives the talking-state visualizer) ----
 let audioCtx: AudioContext | null = null
 let analyser: AnalyserNode | null = null

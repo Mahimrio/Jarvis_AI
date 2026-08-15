@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
-import gsap from 'gsap'
 import type { OrbState } from './states'
 import { runChat, PROVIDERS, providerAvailable, anyKeyPresent, pickProvider, stripToolLeakage, type ChatMessage, type Provider, type ToolExecutor } from '../lib/llm'
-import { speechSupported, useSpeech } from '../lib/speech'
-import { speak, stopSpeaking, ttsAvailable, whenAudioReady, enqueueSpeech, waitForSpeechIdle, getVoiceSpectrum } from '../lib/tts'
-import { getSettings } from '../lib/settings'
+import { speechSupported, useSpeech, useWakeWord } from '../lib/speech'
+import { speak, stopSpeaking, ttsAvailable, whenAudioReady, enqueueSpeech, waitForSpeechIdle, getVoiceSpectrum, forceAudioUnlock } from '../lib/tts'
+import { getSettings, setSetting } from '../lib/settings'
 import { appendChatLog } from '../lib/memlog'
 
 const orangeTint = {
@@ -88,13 +87,15 @@ interface Message {
 
 interface Props {
   state: OrbState
+  hidden: boolean
+  onRequestOpen: () => void
   onOpenBrowser: (url: string) => void
   onStateChange: (s: OrbState) => void
   executeUICommand: ToolExecutor
   onCollapse: () => void
 }
 
-export default function Console({ state, onOpenBrowser, onStateChange, executeUICommand, onCollapse }: Props) {
+export default function Console({ state, hidden, onRequestOpen, onOpenBrowser, onStateChange, executeUICommand, onCollapse }: Props) {
   // thinking-orbs has no 'talking' state — map it for the mini avatars
   const orbState = state === 'talking' ? 'composing' : state
   // 'auto' routes per message; otherwise a pinned provider id (default from settings)
@@ -121,41 +122,27 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [voiceOn, setVoiceOn] = useState(() => getSettings().voiceOn)
+  const [wakeOn, setWakeOn] = useState(() => getSettings().wakeOn)
   const [ttsOnline, setTtsOnline] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
-    const tween = gsap.from(rootRef.current, { x: 72, opacity: 0, duration: 0.5, ease: 'power3.out' })
-    return () => {
-      tween.revert()
-    }
-  }, [])
-
-  const collapse = () => {
-    gsap.to(rootRef.current, {
-      x: '112%',
-      opacity: 0.4,
-      duration: 0.4,
-      ease: 'power3.in',
-      onComplete: onCollapse,
-    })
-  }
-
-  useEffect(() => {
     ttsAvailable().then(setTtsOnline)
   }, [])
 
-  // greet with voice once the voice server is up (waits for first user gesture)
+  // greet the first time the console becomes visible — via wake word or manual open
   useEffect(() => {
-    if (!ttsOnline || greetedRef.current) return
+    if (hidden || greetedRef.current || !ttsOnline) return
     greetedRef.current = true
+    if (!voiceOn) return
+    forceAudioUnlock() // an active mic capture grants autoplay even without a click
     whenAudioReady(() => {
       onStateChange('talking')
       speak(greeting).finally(() => onStateChange('breathing'))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ttsOnline])
+  }, [hidden, ttsOnline])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -290,14 +277,49 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
     }
   }
 
+  // "hey Jarvis" — pops the console open, greets on first contact, runs trailing commands
+  useWakeWord({
+    enabled: wakeOn && speechSupported && !listening && !busy,
+    onWake: (command) => {
+      stopSpeaking()
+      forceAudioUnlock()
+      if (hidden) onRequestOpen()
+      if (command) {
+        greetedRef.current = true // don't talk over the answer
+        void send(command)
+      } else if (greetedRef.current) {
+        start()
+        onStateChange('listening')
+      }
+      // bare wake before the first greeting: the visibility effect greets as it opens
+    },
+    onBlocked: (reason) => {
+      setWakeOn(false)
+      setSetting('wakeOn', false)
+      setMessages((m) => [...m, { role: 'jarvis', text: reason }])
+    },
+  })
+
   return (
-    <aside className="console cut" ref={rootRef}>
+    <aside className={`console cut${hidden ? ' console-hidden' : ''}`} ref={rootRef}>
       <div className="console-header">
         <span className="console-title">
           <span className={`console-led${activeReady ? ' on' : ''}`} />
           NEURAL LINK
         </span>
         <span className="console-header-right">
+          <button
+            type="button"
+            className={`console-voice${wakeOn ? ' on' : ''}`}
+            title={wakeOn ? 'Wake word ON — say "hey Jarvis"' : 'Wake word off'}
+            onClick={() => {
+              const next = !wakeOn
+              setWakeOn(next)
+              setSetting('wakeOn', next)
+            }}
+          >
+            ⌾
+          </button>
           <button
             type="button"
             className={`console-voice${voiceOn && ttsOnline ? ' on' : ''}`}
@@ -309,7 +331,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
           >
             <SpeakerIcon muted={!(voiceOn && ttsOnline)} />
           </button>
-          <button type="button" className="console-collapse" title="Collapse console" onClick={collapse}>
+          <button type="button" className="console-collapse" title="Collapse console" onClick={onCollapse}>
             <ChevronIcon />
           </button>
         </span>
