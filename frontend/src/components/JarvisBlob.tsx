@@ -1,164 +1,14 @@
-import { useEffect, useMemo, useRef, type RefObject } from 'react'
+import { useMemo, useRef, type RefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
-import { MeshSurfaceSampler } from 'three/examples/jsm/math/MeshSurfaceSampler.js'
+import { getVoiceLevel } from '../lib/tts'
 import { STATES, type OrbState } from './states'
 
 const COUNT = 5000
 const RING_COUNT = 900
 
-// rotation speed per state, indexed like STATES (talking holds still, facing you)
-const SPIN = [0, 0.05, 0.08, 0.1, 0.15, 0.2, 0.12, 0.06, 0.1]
-
-// sculpted 3D head: gaussian feature field over an ellipsoid skull —
-// recessed eye sockets w/ glowing irises (feat 2), lip ridges (1 upper, 1.5 lower)
-function faceTargets(positions: Float32Array, count: number) {
-  const face = new Float32Array(count * 3)
-  const feat = new Float32Array(count)
-  const g1 = (d: number, s: number) => Math.exp(-(d * d) / (s * s))
-  const g2 = (dx: number, dy: number, s: number) => Math.exp(-(dx * dx + dy * dy) / (s * s))
-  const S = 1.18
-
-  // pre-pass: gather the dots each eye will recruit so irises can be laid out evenly
-  const eyeL: number[] = []
-  const eyeR: number[] = []
-  for (let i = 0; i < count; i++) {
-    const x = positions[i * 3]
-    const y = positions[i * 3 + 1]
-    const z = positions[i * 3 + 2]
-    if (z <= 0.15) continue
-    if (Math.hypot(x + 0.3, y - 0.16) < 0.13) eyeL.push(i)
-    else if (Math.hypot(x - 0.3, y - 0.16) < 0.13) eyeR.push(i)
-  }
-  // index → [eyeCenterX, ordinal, eyeCount]
-  const irisLookup = new Map<number, [number, number, number]>()
-  eyeL.forEach((idx, k) => irisLookup.set(idx, [-0.3, k, eyeL.length]))
-  eyeR.forEach((idx, k) => irisLookup.set(idx, [0.3, k, eyeR.length]))
-
-  for (let i = 0; i < count; i++) {
-    const i3 = i * 3
-    const x = positions[i3]
-    const y = positions[i3 + 1]
-    const z = positions[i3 + 2]
-    let hx = x * 0.78
-    let hy = y * 0.92
-    let hz = z * 0.8
-    let f = 0
-
-    // jaw narrows toward the chin, skull stays full
-    if (y < -0.1) hx *= 1 - Math.min(0.34, (-y - 0.1) * (-y - 0.1) * 0.75)
-
-    if (z > 0.15) {
-      let dz = 0
-      // brow ridge
-      dz += 0.05 * g1(y - 0.3, 0.1) * g1(x, 0.45)
-      // eye sockets carved in
-      const eL = g2(x + 0.3, y - 0.16, 0.15)
-      const eR = g2(x - 0.3, y - 0.16, 0.15)
-      dz -= 0.12 * Math.max(eL, eR)
-      // nose: bridge, tip, nostril wings
-      const noseB = g1(x, 0.075) * g1(y + 0.02, 0.22)
-      const noseT = g2(x, y + 0.24, 0.1)
-      dz += 0.11 * noseB
-      dz += 0.1 * noseT
-      dz += 0.05 * (g2(x + 0.1, y + 0.27, 0.06) + g2(x - 0.1, y + 0.27, 0.06))
-      // cheekbones
-      dz += 0.05 * (g2(x + 0.45, y + 0.06, 0.17) + g2(x - 0.45, y + 0.06, 0.17))
-      // lips with a shadowed slit between
-      const lipU = g1(y + 0.44, 0.05) * g1(x, 0.24)
-      const lipL = g1(y + 0.53, 0.055) * g1(x, 0.22)
-      dz += 0.05 * lipU + 0.06 * lipL
-      dz -= 0.06 * g1(y + 0.485, 0.028) * g1(x, 0.18)
-      // chin boss
-      dz += 0.05 * g2(x, y + 0.78, 0.15)
-      hz += dz * z
-
-      // glowing irises inside shadowed sockets — even golden-angle discs
-      const iris = irisLookup.get(i)
-      const dEye = Math.min(Math.hypot(x + 0.3, y - 0.16), Math.hypot(x - 0.3, y - 0.16))
-      if (iris) {
-        const [cx, k, n] = iris
-        const rr = Math.sqrt((k + 0.5) / n) * 0.095
-        const ang = k * 2.399963
-        hx = (cx + Math.cos(ang) * rr) * 0.78
-        hy = (0.16 + Math.sin(ang) * rr * 0.7) * 0.92
-        hz = 0.58
-        f = 2
-      } else if (dEye < 0.2) {
-        f = -1 // socket shadow ring
-      } else if (lipU > 0.35) {
-        f = 1
-      } else if (lipL > 0.35) {
-        f = 1.5
-      } else if (noseB > 0.55 || noseT > 0.55) {
-        f = 0.6 // subtle nose highlight
-      }
-    }
-
-    // subtle ears
-    if (Math.abs(x) > 0.86 && Math.abs(y - 0.02) < 0.22 && Math.abs(z) < 0.3) {
-      hx *= 1.07
-      hz *= 0.9
-    }
-
-    face[i3] = hx * S
-    face[i3 + 1] = hy * S
-    face[i3 + 2] = hz * S
-    feat[i] = f
-  }
-  return { face, feat }
-}
-
-// Sample particle targets from a real scanned human head (Lee Perry-Smith, CC-BY,
-// shipped with three.js examples). Features are anchored to the nose tip so the
-// glowing eyes / animated mouth land on true anatomy.
-function sampleHeadMesh(mesh: THREE.Mesh, count: number, face: Float32Array, feat: Float32Array) {
-  const sampler = new MeshSurfaceSampler(mesh).build()
-  const p = new THREE.Vector3()
-  mesh.geometry.computeBoundingBox()
-  const bb = mesh.geometry.boundingBox!
-  const center = bb.getCenter(new THREE.Vector3())
-  const size = bb.getSize(new THREE.Vector3())
-  const scale = 2.55 / size.y
-
-  for (let i = 0; i < count; i++) {
-    sampler.sample(p)
-    face[i * 3] = (p.x - center.x) * scale
-    face[i * 3 + 1] = (p.y - center.y) * scale
-    face[i * 3 + 2] = (p.z - center.z) * scale
-  }
-
-  // landmarks measured from the scan: nose tip is the frontmost point of the whole bust;
-  // eye sockets sit ~0.16 above it, the mouth slit ~0.18 below (profiled via z-per-y bins)
-  let zFront = -Infinity
-  let noseY = 0
-  for (let i = 0; i < count; i++) {
-    if (face[i * 3 + 2] > zFront) {
-      zFront = face[i * 3 + 2]
-      noseY = face[i * 3 + 1]
-    }
-  }
-  const eyeY = noseY + 0.16
-  const mouthY = noseY - 0.18
-
-  for (let i = 0; i < count; i++) {
-    const x = face[i * 3]
-    const y = face[i * 3 + 1]
-    const z = face[i * 3 + 2]
-    let f = 0
-    if (z > 0.3) {
-      const dEye = Math.min(Math.hypot(x + 0.18, y - eyeY), Math.hypot(x - 0.18, y - eyeY))
-      const dNose = Math.hypot(x, y - noseY)
-      if (dEye < 0.075) f = 2
-      else if (dEye < 0.12) f = -1
-      else if (Math.abs(x) < 0.14 && Math.abs(y - mouthY) < 0.04 && z > zFront - 0.35) f = y >= mouthY ? 1 : 1.5
-      else if (dNose < 0.055 && z > zFront - 0.12) f = 0.6
-    }
-    feat[i] = f
-  }
-}
+// rotation speed per state, indexed like STATES
+const SPIN = [0.06, 0.05, 0.08, 0.1, 0.15, 0.2, 0.12, 0.06, 0.1]
 
 // scattered dust annulus around the blob
 function ringDistribution(count: number) {
@@ -197,9 +47,8 @@ const vertexShader = /* glsl */ `
   uniform int uStateFrom;
   uniform int uStateTo;
   uniform float uBlend;
+  uniform float uTalk;
   attribute float aPhase;
-  attribute vec3 aFace;
-  attribute float aFeat;
   varying float vAlpha;
   varying float vBoost;
 
@@ -208,32 +57,18 @@ const vertexShader = /* glsl */ `
     return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
   }
 
-  void applyState(int st, vec3 p, float t, float phase, vec3 facePos, float feat, out vec3 pos, out float breath, out float boost) {
+  void applyState(int st, vec3 p, float t, float phase, float talk, out vec3 pos, out float breath, out float boost) {
     pos = p;
     boost = 0.0;
     // ever-present breathing baseline in every state
     breath = 1.0 + 0.04 * sin(t * 1.2 + phase * 6.2831);
 
     if (st == 0) {
-      // talking: particles assemble into a sculpted face; eyes glow, mouth moves
-      pos = facePos;
-      breath = 1.0 + 0.012 * sin(t * 1.5 + phase * 6.2831);
-      if (feat < -0.5) {
-        boost = -0.75; // dark eye sockets
-      } else if (feat > 1.75) {
-        boost = 1.7 + 0.5 * sin(t * 3.0 + phase * 3.0);
-      } else if (feat > 1.25) {
-        // lower lip drops with speech cadence
-        float open = (0.5 + 0.5 * sin(t * 9.0)) * (0.55 + 0.45 * sin(t * 2.3));
-        pos.y -= open * 0.07;
-        boost = 0.8;
-      } else if (feat > 0.75) {
-        boost = 0.8;
-      } else if (feat > 0.25) {
-        boost = 0.45;
-      } else if (facePos.z < 0.0) {
-        boost = -0.6; // rear skull recedes so the face reads
-      }
+      // talking: constellation twinkle (like connecting) + the whole orb
+      // glows and swells with every word Jarvis speaks
+      boost = pow(0.5 + 0.5 * sin(t * 4.0 + phase * 40.0), 3.0) * 1.4;
+      breath += talk * (0.3 + 0.08 * sin(t * 6.0 + phase * 6.2831));
+      boost += talk * (1.1 + 0.5 * sin(t * 8.0 + phase * 12.0));
     } else if (st == 1) {
       // searching: a bright meridian sweeps the globe
       float ang = atan(pos.x, pos.z);
@@ -278,9 +113,9 @@ const vertexShader = /* glsl */ `
 
   void main() {
     vec3 posA; float breathA; float boostA;
-    applyState(uStateFrom, position, uTime, aPhase, aFace, aFeat, posA, breathA, boostA);
+    applyState(uStateFrom, position, uTime, aPhase, uTalk, posA, breathA, boostA);
     vec3 posB; float breathB; float boostB;
-    applyState(uStateTo, position, uTime, aPhase, aFace, aFeat, posB, breathB, boostB);
+    applyState(uStateTo, position, uTime, aPhase, uTalk, posB, breathB, boostB);
 
     // staggered per-particle blend: particles flow into the new state as a wave
     float k = smoothstep(0.0, 1.0, clamp(uBlend * 1.35 - aPhase * 0.35, 0.0, 1.0));
@@ -290,16 +125,11 @@ const vertexShader = /* glsl */ `
 
     pos *= breath;
 
-    // in the talking state, iris particles swell into solid glowing orbs
-    float talkK = mix(uStateFrom == 0 ? 1.0 : 0.0, uStateTo == 0 ? 1.0 : 0.0, k);
-    float irisK = talkK * step(1.75, aFeat);
-
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mvPosition;
     gl_PointSize = 4.2 * (1.0 / -mvPosition.z);
     gl_PointSize *= 300.0;
     gl_PointSize = clamp(gl_PointSize, 1.0, 6.0);
-    gl_PointSize *= 1.0 + irisK * 1.6;
 
     // fade dots on the far side for depth
     vAlpha = smoothstep(-1.2, 1.2, pos.z) * 0.75 + 0.25;
@@ -402,36 +232,8 @@ export default function JarvisBlob({
     return { positions: fibonacciSphere(COUNT), phases }
   }, [])
 
-  const faceData = useMemo(() => faceTargets(positions, COUNT), [positions])
-
-  // swap in the real scanned head once it loads (procedural head is the instant fallback)
-  useEffect(() => {
-    let cancelled = false
-    const draco = new DRACOLoader()
-    draco.setDecoderPath('/draco/')
-    const loader = new GLTFLoader()
-    loader.setDRACOLoader(draco)
-    loader.load('/models/head.glb', (gltf) => {
-      if (cancelled) return
-      let mesh: THREE.Mesh | undefined
-      gltf.scene.traverse((o) => {
-        if (!mesh && (o as THREE.Mesh).isMesh) mesh = o as THREE.Mesh
-      })
-      if (!mesh) return
-      sampleHeadMesh(mesh, COUNT, faceData.face, faceData.feat)
-      const geo = pointsRef.current?.geometry
-      if (geo) {
-        geo.attributes.aFace.needsUpdate = true
-        geo.attributes.aFeat.needsUpdate = true
-      }
-    })
-    return () => {
-      cancelled = true
-      draco.dispose()
-    }
-  }, [faceData])
-
   const ring = useMemo(() => ringDistribution(RING_COUNT), [])
+  const talkLevel = useRef(0)
 
   useFrame((frame, delta) => {
     const points = pointsRef.current
@@ -440,14 +242,13 @@ export default function JarvisBlob({
     const tr = trans.current
     tr.blend = Math.min(1, tr.blend + delta / 1.2)
     const ease = tr.blend * tr.blend * (3 - 2 * tr.blend)
-    if (tr.to === 0) {
-      // talking: settle rotation so the face looks at the camera
-      const twoPi = Math.PI * 2
-      const target = Math.round(points.rotation.y / twoPi) * twoPi
-      points.rotation.y = THREE.MathUtils.damp(points.rotation.y, target, 3.5, delta)
-    } else {
-      points.rotation.y += delta * THREE.MathUtils.lerp(SPIN[tr.from], SPIN[tr.to], ease)
-    }
+    points.rotation.y += delta * THREE.MathUtils.lerp(SPIN[tr.from], SPIN[tr.to], ease)
+
+    // smoothed voice amplitude — fast attack, gentle release, word-level bounce
+    const raw = getVoiceLevel()
+    talkLevel.current = raw > talkLevel.current
+      ? THREE.MathUtils.lerp(talkLevel.current, raw, 1 - Math.exp(-delta * 30))
+      : THREE.MathUtils.lerp(talkLevel.current, raw, 1 - Math.exp(-delta * 8))
 
     // subtle parallax toward the mouse (whole assembly tilts)
     pointer.current.x = THREE.MathUtils.lerp(pointer.current.x, frame.pointer.x, 0.05)
@@ -471,6 +272,7 @@ export default function JarvisBlob({
       materialRef.current.uniforms.uStateFrom.value = tr.from
       materialRef.current.uniforms.uStateTo.value = tr.to
       materialRef.current.uniforms.uBlend.value = tr.blend
+      materialRef.current.uniforms.uTalk.value = talkLevel.current
     }
 
     // mirror the shader's silhouette so the floor shadow tracks the blob
@@ -479,6 +281,7 @@ export default function JarvisBlob({
       const breathFor = (idx: number) => {
         if (idx === 7) return 1 + 0.13 * Math.sin(t * 1.4)
         if (idx === 3) return 1 + 0.055 * Math.sin(t * 5.0)
+        if (idx === 0) return 1 + 0.04 * Math.sin(t * 1.2) + talkLevel.current * 0.3
         if (idx === 8) {
           const m = 0.5 + 0.5 * Math.sin(t * 0.9)
           return 1 - 0.12 * Math.min(1, Math.max(0, (m - 0.25) / 0.5))
@@ -487,8 +290,6 @@ export default function JarvisBlob({
       }
       const breath = THREE.MathUtils.lerp(breathFor(tr.from), breathFor(tr.to), ease)
       const spread = (breath - 1) * 4
-      // core recedes while the face is on-screen so features stay readable
-      const talkAmount = tr.to === 0 ? ease : tr.from === 0 ? 1 - ease : 0
       shadowRef.current.style.transform =
         `translateX(${(-pointer.current.x * 46).toFixed(1)}px) ` +
         `scale(${(breath + spread).toFixed(3)}, ${breath.toFixed(3)})`
@@ -496,10 +297,10 @@ export default function JarvisBlob({
 
       // core pulses with the same breath, amplified
       if (coreRef.current) {
-        coreRef.current.scale.setScalar((1 + (breath - 1) * 2.2) * (1 - talkAmount * 0.75))
+        coreRef.current.scale.setScalar(1 + (breath - 1) * 2.2)
       }
       if (coreMatRef.current) {
-        coreMatRef.current.uniforms.uIntensity.value = (0.85 + (breath - 1) * 4.0) * (1 - talkAmount * 0.8)
+        coreMatRef.current.uniforms.uIntensity.value = 0.85 + (breath - 1) * 4.0
       }
     }
   })
@@ -510,15 +311,13 @@ export default function JarvisBlob({
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[positions, 3]} />
           <bufferAttribute attach="attributes-aPhase" args={[phases, 1]} />
-          <bufferAttribute attach="attributes-aFace" args={[faceData.face, 3]} />
-          <bufferAttribute attach="attributes-aFeat" args={[faceData.feat, 1]} />
         </bufferGeometry>
         <shaderMaterial
           key={vertexShader + fragmentShader}
           ref={materialRef}
           vertexShader={vertexShader}
           fragmentShader={fragmentShader}
-          uniforms={{ uTime: { value: 0 }, uStateFrom: { value: 0 }, uStateTo: { value: 0 }, uBlend: { value: 1 } }}
+          uniforms={{ uTime: { value: 0 }, uStateFrom: { value: 0 }, uStateTo: { value: 0 }, uBlend: { value: 1 }, uTalk: { value: 0 } }}
           transparent
           depthWrite={false}
           blending={THREE.AdditiveBlending}

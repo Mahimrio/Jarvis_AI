@@ -7,6 +7,7 @@ import Console from './components/Console'
 import BrowserWindow, { type Anchor } from './components/BrowserWindow'
 import Sidebar from './components/Sidebar'
 import InfoCards from './components/InfoCards'
+import { isSpeaking } from './lib/tts'
 import { STATES, type OrbState } from './components/states'
 
 const HOME = 'https://www.google.com/webhp?igu=1'
@@ -61,10 +62,18 @@ export default function App() {
   const [consoleOpen, setConsoleOpen] = useState(true)
   const shadowRef = useRef<HTMLDivElement>(null)
 
-  // failsafe: whatever happens, the core always drifts home to breathing
+  // failsafe: whatever happens, the core always drifts home to breathing —
+  // but never while Jarvis is still speaking (long answers keep the talking state)
   useEffect(() => {
     if (state === 'breathing') return
-    const id = setTimeout(() => setStateRaw('breathing'), 12000)
+    let id: number
+    const arm = (ms: number) => {
+      id = window.setTimeout(() => {
+        if (isSpeaking()) arm(1500)
+        else setStateRaw('breathing')
+      }, ms)
+    }
+    arm(12000)
     return () => clearTimeout(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, stateNonce.current])

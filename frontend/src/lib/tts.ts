@@ -14,6 +14,7 @@ function unlockAudio() {
   audioUnlocked = true
   window.removeEventListener('pointerdown', unlockAudio)
   window.removeEventListener('keydown', unlockAudio)
+  initAnalyser() // must happen inside a real user gesture
   readyCallbacks.splice(0).forEach((cb) => cb())
 }
 if (typeof window !== 'undefined') {
@@ -24,6 +25,51 @@ if (typeof window !== 'undefined') {
 export function whenAudioReady(cb: () => void) {
   if (audioUnlocked) cb()
   else readyCallbacks.push(cb)
+}
+
+// ---- live voice amplitude (drives the talking-state visualizer) ----
+let audioCtx: AudioContext | null = null
+let analyser: AnalyserNode | null = null
+let levelData: Uint8Array | null = null
+
+function initAnalyser() {
+  try {
+    audioCtx = new AudioContext()
+    analyser = audioCtx.createAnalyser()
+    analyser.fftSize = 256
+    analyser.smoothingTimeConstant = 0.55
+    analyser.connect(audioCtx.destination)
+    levelData = new Uint8Array(analyser.frequencyBinCount)
+    // fire-and-forget: NEVER await resume(), it can hang forever
+    if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => {})
+  } catch {
+    audioCtx = null
+    analyser = null
+  }
+}
+
+function wireAnalyser(audio: HTMLAudioElement) {
+  // only reroute through the context when it is actually running,
+  // otherwise a suspended context would silence the element entirely
+  if (!audioCtx || !analyser || audioCtx.state !== 'running') return
+  try {
+    audioCtx.createMediaElementSource(audio).connect(analyser)
+  } catch {
+    /* element keeps playing directly */
+  }
+}
+
+// 0..1 — how loud Jarvis is speaking right now
+export function getVoiceLevel(): number {
+  if (!analyser || !levelData || !current) return 0
+  analyser.getByteFrequencyData(levelData)
+  let sum = 0
+  for (let i = 0; i < levelData.length; i++) sum += levelData[i]
+  return Math.min(1, sum / levelData.length / 85)
+}
+
+export function isSpeaking(): boolean {
+  return current !== null || pumping || queue.length > 0
 }
 
 export async function ttsAvailable(): Promise<boolean> {
@@ -64,6 +110,7 @@ function playUrl(url: string): Promise<void> {
   return new Promise((resolve) => {
     const audio = new Audio(url)
     current = audio
+    wireAnalyser(audio)
     const finish = () => {
       if (current === audio) current = null
       resolve()
