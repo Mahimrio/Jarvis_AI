@@ -29,7 +29,12 @@ if _ENV_FILE.exists():
 VOICE_DIR = Path(__file__).parent / "voice"
 VOICE_MP3 = VOICE_DIR / "jarvis-clone.mp3"
 VOICE_CACHE = VOICE_DIR / "jarvis-clone.safetensors"
-VOSK_DIR = Path(__file__).parent / "models" / "vosk-small-en"
+# prefer the larger, more accurate model when present
+_VOSK_CANDIDATES = [
+    Path(__file__).parent / "models" / "vosk-en-lgraph",
+    Path(__file__).parent / "models" / "vosk-small-en",
+]
+VOSK_DIR = next((p for p in _VOSK_CANDIDATES if p.exists()), _VOSK_CANDIDATES[-1])
 
 app = FastAPI(title="Jarvis Voice Server")
 app.add_middleware(
