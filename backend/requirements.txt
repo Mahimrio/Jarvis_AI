@@ -3,3 +3,9 @@ fastapi
 uvicorn
 scipy
 soundfile
+openwakeword
+onnxruntime
+faster-whisper
+vosk
+websockets
+ddgs
