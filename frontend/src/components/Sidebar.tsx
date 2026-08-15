@@ -1,29 +1,33 @@
 import { useFeed } from '../lib/feed'
 import { useMailUnread } from '../lib/mail'
 
+export type PanelName = 'feed' | 'mail' | 'memory' | 'system' | 'network' | 'tools' | 'settings'
+
 interface Props {
   browserOpen: boolean
   consoleOpen: boolean
-  feedOpen: boolean
-  mailOpen: boolean
+  activePanel: PanelName | null
   onToggleBrowser: () => void
   onToggleConsole: () => void
-  onToggleFeed: () => void
-  onToggleMail: () => void
+  onSelectPanel: (name: PanelName) => void
 }
 
-const PASSIVE_ITEMS = ['MEMORY', 'SYSTEM', 'NETWORK', 'TOOLS', 'SETTINGS'] as const
-const ICONS: Record<string, string> = {
-  MEMORY: '◈',
-  SYSTEM: '⬡',
-  NETWORK: '⇌',
-  TOOLS: '⚒',
-  SETTINGS: '⚙',
-}
+const MODULES: { name: PanelName; icon: string; label: string }[] = [
+  { name: 'feed', icon: '▤', label: 'FEED' },
+  { name: 'mail', icon: '✉', label: 'MAIL' },
+  { name: 'memory', icon: '◈', label: 'MEMORY' },
+  { name: 'system', icon: '⬡', label: 'SYSTEM' },
+  { name: 'network', icon: '⇌', label: 'NETWORK' },
+  { name: 'tools', icon: '⚒', label: 'TOOLS' },
+  { name: 'settings', icon: '⚙', label: 'SETTINGS' },
+]
 
-export default function Sidebar({ browserOpen, consoleOpen, feedOpen, mailOpen, onToggleBrowser, onToggleConsole, onToggleFeed, onToggleMail }: Props) {
+export default function Sidebar({ browserOpen, consoleOpen, activePanel, onToggleBrowser, onToggleConsole, onSelectPanel }: Props) {
   const { unread } = useFeed()
   const mailUnread = useMailUnread()
+  const badgeFor = (name: PanelName) =>
+    name === 'feed' ? unread : name === 'mail' ? mailUnread : 0
+
   return (
     <nav className="sidebar">
       <button
@@ -42,30 +46,22 @@ export default function Sidebar({ browserOpen, consoleOpen, feedOpen, mailOpen, 
         <span className="side-icon">⌨</span>
         <span className="side-label">CONSOLE</span>
       </button>
-      <button
-        type="button"
-        className={`side-btn${feedOpen ? ' active' : ''}`}
-        onClick={onToggleFeed}
-      >
-        <span className="side-icon">▤</span>
-        <span className="side-label">FEED</span>
-        {unread > 0 && !feedOpen && <span className="feed-badge">{unread > 99 ? '99+' : unread}</span>}
-      </button>
-      <button
-        type="button"
-        className={`side-btn${mailOpen ? ' active' : ''}`}
-        onClick={onToggleMail}
-      >
-        <span className="side-icon">✉</span>
-        <span className="side-label">MAIL</span>
-        {mailUnread > 0 && !mailOpen && <span className="feed-badge">{mailUnread > 99 ? '99+' : mailUnread}</span>}
-      </button>
-      {PASSIVE_ITEMS.map((name) => (
-        <button key={name} type="button" className="side-btn dormant" title="Module offline">
-          <span className="side-icon">{ICONS[name]}</span>
-          <span className="side-label">{name}</span>
-        </button>
-      ))}
+      {MODULES.map((m) => {
+        const badge = badgeFor(m.name)
+        const active = activePanel === m.name
+        return (
+          <button
+            key={m.name}
+            type="button"
+            className={`side-btn${active ? ' active' : ''}`}
+            onClick={() => onSelectPanel(m.name)}
+          >
+            <span className="side-icon">{m.icon}</span>
+            <span className="side-label">{m.label}</span>
+            {badge > 0 && !active && <span className="feed-badge">{badge > 99 ? '99+' : badge}</span>}
+          </button>
+        )
+      })}
     </nav>
   )
 }

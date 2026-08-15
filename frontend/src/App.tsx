@@ -5,10 +5,15 @@ import JarvisBlob from './components/JarvisBlob'
 import HudBar from './components/HudBar'
 import Console from './components/Console'
 import BrowserWindow, { type Anchor } from './components/BrowserWindow'
-import Sidebar from './components/Sidebar'
+import Sidebar, { type PanelName } from './components/Sidebar'
 import InfoCards from './components/InfoCards'
 import FeedPanel from './components/FeedPanel'
 import MailPanel from './components/MailPanel'
+import MemoryPanel from './components/MemoryPanel'
+import SystemPanel from './components/SystemPanel'
+import NetworkPanel from './components/NetworkPanel'
+import ToolsPanel from './components/ToolsPanel'
+import SettingsPanel from './components/SettingsPanel'
 import { isSpeaking } from './lib/tts'
 import { addFeedItem, initFeedSources } from './lib/feed'
 import { mailSummaryForChat } from './lib/mail'
@@ -64,27 +69,26 @@ export default function App() {
     position: 'center',
   })
   const [consoleOpen, setConsoleOpen] = useState(true)
-  const [feedOpen, setFeedOpen] = useState(false)
-  const [feedClosing, setFeedClosing] = useState(false)
+  const [panel, setPanel] = useState<PanelName | null>(null)
+  const [panelClosing, setPanelClosing] = useState(false)
   const shadowRef = useRef<HTMLDivElement>(null)
 
-  // opening is instant; closing plays the exit animation first, then unmounts
-  const toggleFeed = () => {
-    if (feedOpen && !feedClosing) setFeedClosing(true)
-    else if (!feedOpen) {
-      setFeedOpen(true)
-      setFeedClosing(false)
+  // one side panel at a time: same button = animated close, other = instant switch
+  const selectPanel = (name: PanelName) => {
+    if (panel === name && !panelClosing) setPanelClosing(true)
+    else {
+      setPanel(name)
+      setPanelClosing(false)
     }
   }
-
-  const [mailOpen, setMailOpen] = useState(false)
-  const [mailClosing, setMailClosing] = useState(false)
-  const toggleMail = () => {
-    if (mailOpen && !mailClosing) setMailClosing(true)
-    else if (!mailOpen) {
-      setMailOpen(true)
-      setMailClosing(false)
-    }
+  const panelClosed = () => {
+    setPanel(null)
+    setPanelClosing(false)
+  }
+  const panelProps = {
+    closing: panelClosing,
+    onRequestClose: () => setPanelClosing(true),
+    onClosed: panelClosed,
   }
 
   // live feed: news poller + server/network watchers (idempotent)
@@ -150,8 +154,8 @@ export default function App() {
         return `Noted and saved to the feed: "${text}"`
       }
       case 'check_mail': {
-        setMailOpen(true)
-        setMailClosing(false)
+        setPanel('mail')
+        setPanelClosing(false)
         return mailSummaryForChat()
       }
       default:
@@ -180,35 +184,24 @@ export default function App() {
       <Sidebar
         browserOpen={browser.open}
         consoleOpen={consoleOpen}
-        feedOpen={feedOpen && !feedClosing}
-        mailOpen={mailOpen && !mailClosing}
+        activePanel={panelClosing ? null : panel}
         onToggleBrowser={() => setBrowser((b) => ({ ...b, open: !b.open }))}
         onToggleConsole={() => setConsoleOpen((v) => !v)}
-        onToggleFeed={toggleFeed}
-        onToggleMail={toggleMail}
+        onSelectPanel={selectPanel}
       />
       <InfoCards />
-      {feedOpen && (
+      {panel === 'feed' && (
         <FeedPanel
-          closing={feedClosing}
+          {...panelProps}
           onOpenLink={(url) => setBrowser({ open: true, url, position: 'center' })}
-          onRequestClose={toggleFeed}
-          onClosed={() => {
-            setFeedOpen(false)
-            setFeedClosing(false)
-          }}
         />
       )}
-      {mailOpen && (
-        <MailPanel
-          closing={mailClosing}
-          onRequestClose={toggleMail}
-          onClosed={() => {
-            setMailOpen(false)
-            setMailClosing(false)
-          }}
-        />
-      )}
+      {panel === 'mail' && <MailPanel {...panelProps} />}
+      {panel === 'memory' && <MemoryPanel {...panelProps} />}
+      {panel === 'system' && <SystemPanel {...panelProps} />}
+      {panel === 'network' && <NetworkPanel {...panelProps} />}
+      {panel === 'tools' && <ToolsPanel {...panelProps} executeUICommand={executeUICommand} />}
+      {panel === 'settings' && <SettingsPanel {...panelProps} />}
       {consoleOpen ? (
         <Console
           state={state}

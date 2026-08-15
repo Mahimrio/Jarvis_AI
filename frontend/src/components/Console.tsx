@@ -5,6 +5,8 @@ import type { OrbState } from './states'
 import { runChat, PROVIDERS, providerAvailable, anyKeyPresent, pickProvider, stripToolLeakage, type ChatMessage, type Provider, type ToolExecutor } from '../lib/llm'
 import { speechSupported, useSpeech } from '../lib/speech'
 import { speak, stopSpeaking, ttsAvailable, whenAudioReady, enqueueSpeech, waitForSpeechIdle } from '../lib/tts'
+import { getSettings } from '../lib/settings'
+import { appendChatLog } from '../lib/memlog'
 
 const orangeTint = {
   filter: 'sepia(1) saturate(4) hue-rotate(-15deg) brightness(1.15)',
@@ -63,8 +65,12 @@ interface Props {
 export default function Console({ state, onOpenBrowser, onStateChange, executeUICommand, onCollapse }: Props) {
   // thinking-orbs has no 'talking' state — map it for the mini avatars
   const orbState = state === 'talking' ? 'composing' : state
-  // 'auto' routes per message; otherwise a pinned provider id
-  const [mode, setMode] = useState<'auto' | string>(anyKeyPresent ? 'auto' : PROVIDERS[0].id)
+  // 'auto' routes per message; otherwise a pinned provider id (default from settings)
+  const [mode, setMode] = useState<'auto' | string>(() => {
+    const pref = getSettings().defaultMode
+    if (pref !== 'auto' && PROVIDERS.some((p) => p.id === pref && providerAvailable(p))) return pref
+    return anyKeyPresent ? 'auto' : PROVIDERS[0].id
+  })
   const [lastUsed, setLastUsed] = useState<Provider | null>(null)
   const [modelOpen, setModelOpen] = useState(false)
   const pinned = mode === 'auto' ? null : PROVIDERS.find((p) => p.id === mode) ?? PROVIDERS[0]
@@ -82,7 +88,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  const [voiceOn, setVoiceOn] = useState(true)
+  const [voiceOn, setVoiceOn] = useState(() => getSettings().voiceOn)
   const [ttsOnline, setTtsOnline] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLElement>(null)
@@ -212,6 +218,7 @@ export default function Console({ state, onOpenBrowser, onStateChange, executeUI
 
     const cleaned = stripToolLeakage(acc)
     if (cleaned !== acc) setMessages([...base, { role: 'jarvis', text: cleaned || 'Acknowledged, sir.' }])
+    if (cleaned) appendChatLog(text, cleaned) // MEMORY module: remember the exchange
 
     if (speakLive) {
       const leftover = cleaned.slice(sentUpTo).trim()

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getSettings } from './settings'
 
 export type FeedKind = 'news' | 'system' | 'note'
 
@@ -112,7 +113,9 @@ interface CurrentsArticle {
 
 async function pollCurrents(): Promise<boolean> {
   if (!NEWS_KEY) return false
-  const slot = NEWS_ROTATION[rotationIdx % NEWS_ROTATION.length]
+  const enabled = NEWS_ROTATION.filter((s) => getSettings().newsCats.includes(s.label))
+  if (enabled.length === 0) return true // news disabled in settings — no fallback either
+  const slot = enabled[rotationIdx % enabled.length]
   rotationIdx++
   try {
     const res = await fetch(
