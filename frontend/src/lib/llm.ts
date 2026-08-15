@@ -69,7 +69,7 @@ const firstReady = () => PROVIDERS.find(providerAvailable) ?? PROVIDERS[0]
 
 // route each message to the best available brain
 const FRESH_RE = /\b(latest|current|today|tonight|now|news|recent|weather|price|stock|score|happening|trend|202[4-9]|screen|see|look at|image|picture|photo|vision|screenshot|diagram)\b/i
-const ACTION_RE = /\b(open|close|move|show|hide|go to|navigate|search|play|youtube|wikipedia|browser|window|protocol|breathing|listening|shaping|corner|top[- ]?right|top[- ]?left|bottom)\b/i
+const ACTION_RE = /\b(open|close|move|show|hide|go to|navigate|search|play|youtube|wikipedia|browser|window|protocol|breathing|listening|shaping|corner|top[- ]?right|top[- ]?left|bottom|note|remember|remind|mail|email|inbox)\b/i
 const HEAVY_RE = /\b(explain|analy[sz]e|why|how (do|does|to|can)|code|write|program|debug|refactor|compare|summar|plan|reason|solve|calcul|essay|story|detailed?|architect|design)\b/i
 
 export function pickProvider(text: string): Provider {
@@ -169,6 +169,30 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'add_note',
+      description:
+        'Save a personal note or reminder to the live feed when sir asks to note, remember, or remind him of something. Pass the note text itself, cleanly worded.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'The note content to save.' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_mail',
+      description:
+        "Check sir's Gmail inbox. Opens the mail panel and returns the unread count plus the latest message subjects for you to summarize.",
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ]
 
 export interface ChatMessage {
@@ -189,7 +213,7 @@ interface ApiMessage {
   tool_call_id?: string
 }
 
-export type ToolExecutor = (name: string, args: Record<string, unknown>) => string
+export type ToolExecutor = (name: string, args: Record<string, unknown>) => string | Promise<string>
 
 interface RunChatOptions {
   provider: Provider
@@ -317,7 +341,7 @@ export async function runChat({ provider, history, onDelta, executeTool }: RunCh
   for (const call of toolCalls) {
     let result: string
     try {
-      result = executeTool(call.function.name, JSON.parse(call.function.arguments || '{}'))
+      result = await executeTool(call.function.name, JSON.parse(call.function.arguments || '{}'))
     } catch (err) {
       result = `Tool failed: ${err instanceof Error ? err.message : err}`
     }

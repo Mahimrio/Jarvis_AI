@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+.env
 
 # regenerated from the mp3 on first boot
 voice/*.safetensors

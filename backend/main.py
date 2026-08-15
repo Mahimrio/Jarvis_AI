@@ -1,5 +1,11 @@
+import imaplib
 import io
+import os
+import re
 import threading
+from email import message_from_bytes
+from email.header import decode_header, make_header
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +15,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from pocket_tts import TTSModel, export_model_state
+
+# load backend/.env (KEY=VALUE lines) without adding a dependency
+_ENV_FILE = Path(__file__).parent / ".env"
+if _ENV_FILE.exists():
+    for _line in _ENV_FILE.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 VOICE_DIR = Path(__file__).parent / "voice"
 VOICE_MP3 = VOICE_DIR / "jarvis-clone.mp3"
@@ -96,3 +111,140 @@ def tts_stream(req: TTSRequest):
         media_type="application/octet-stream",
         headers={"X-Sample-Rate": str(model.sample_rate)},
     )
+
+
+# ---- Gmail via IMAP (read-only, app password from backend/.env) ----------
+
+IMAP_HOST = "imap.gmail.com"
+
+
+def _mail_creds() -> tuple[str, str] | None:
+    addr = os.environ.get("GMAIL_ADDRESS", "").strip()
+    pw = os.environ.get("GMAIL_APP_PASSWORD", "").replace(" ", "").strip()
+    return (addr, pw) if addr and pw else None
+
+
+def _imap() -> imaplib.IMAP4_SSL:
+    creds = _mail_creds()
+    if not creds:
+        raise HTTPException(status_code=503, detail="Mail not configured")
+    try:
+        conn = imaplib.IMAP4_SSL(IMAP_HOST, timeout=15)
+        conn.login(*creds)
+        return conn
+    except imaplib.IMAP4.error as exc:
+        raise HTTPException(status_code=502, detail=f"IMAP login failed: {exc}") from exc
+
+
+def _decode(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return str(make_header(decode_header(value)))
+    except Exception:
+        return value
+
+
+def _body_text(msg) -> str:
+    parts = msg.walk() if msg.is_multipart() else [msg]
+    html = None
+    for part in parts:
+        ctype = part.get_content_type()
+        if ctype == "text/plain":
+            try:
+                return part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", "replace")
+            except Exception:
+                continue
+        if ctype == "text/html" and html is None:
+            try:
+                html = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", "replace")
+            except Exception:
+                continue
+    if html:
+        text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
+        text = re.sub(r"<[^>]+>", " ", text)
+        return re.sub(r"\s{2,}", " ", text).strip()
+    return ""
+
+
+@app.get("/mail/status")
+def mail_status():
+    if not _mail_creds():
+        return {"configured": False, "unread": 0}
+    conn = _imap()
+    try:
+        status, data = conn.status("INBOX", "(UNSEEN)")
+        unread = int(re.search(rb"UNSEEN (\d+)", data[0]).group(1)) if status == "OK" else 0
+        return {"configured": True, "unread": unread}
+    finally:
+        conn.logout()
+
+
+@app.get("/mail/inbox")
+def mail_inbox(limit: int = 20):
+    conn = _imap()
+    try:
+        conn.select("INBOX", readonly=True)
+        status, data = conn.uid("search", None, "ALL")
+        if status != "OK":
+            raise HTTPException(status_code=502, detail="IMAP search failed")
+        uids = data[0].split()[-limit:]
+        if not uids:
+            return {"messages": []}
+        status, fetched = conn.uid(
+            "fetch", b",".join(uids), "(FLAGS BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])"
+        )
+        if status != "OK":
+            raise HTTPException(status_code=502, detail="IMAP fetch failed")
+        messages = []
+        i = 0
+        while i < len(fetched):
+            item = fetched[i]
+            if isinstance(item, tuple):
+                meta = item[0].decode(errors="replace")
+                msg = message_from_bytes(item[1])
+                uid_m = re.search(r"UID (\d+)", meta)
+                try:
+                    ts = parsedate_to_datetime(msg.get("Date")).timestamp() * 1000
+                except Exception:
+                    ts = 0
+                messages.append(
+                    {
+                        "uid": uid_m.group(1) if uid_m else "",
+                        "sender": _decode(msg.get("From")),
+                        "subject": _decode(msg.get("Subject")) or "(no subject)",
+                        "ts": ts,
+                        "unread": b"\\Seen" not in item[0],
+                    }
+                )
+            i += 1
+        messages.sort(key=lambda m: m["ts"], reverse=True)
+        return {"messages": messages}
+    finally:
+        conn.logout()
+
+
+@app.get("/mail/message/{uid}")
+def mail_message(uid: str):
+    if not uid.isdigit():
+        raise HTTPException(status_code=400, detail="Bad uid")
+    conn = _imap()
+    try:
+        conn.select("INBOX", readonly=True)
+        status, data = conn.uid("fetch", uid, "(BODY.PEEK[])")
+        if status != "OK" or not data or not isinstance(data[0], tuple):
+            raise HTTPException(status_code=404, detail="Message not found")
+        msg = message_from_bytes(data[0][1])
+        try:
+            ts = parsedate_to_datetime(msg.get("Date")).timestamp() * 1000
+        except Exception:
+            ts = 0
+        return {
+            "uid": uid,
+            "sender": _decode(msg.get("From")),
+            "subject": _decode(msg.get("Subject")) or "(no subject)",
+            "ts": ts,
+            "body": _body_text(msg)[:20000],
+        }
+    finally:
+        conn.logout()

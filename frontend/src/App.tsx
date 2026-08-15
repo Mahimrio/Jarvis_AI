@@ -7,7 +7,11 @@ import Console from './components/Console'
 import BrowserWindow, { type Anchor } from './components/BrowserWindow'
 import Sidebar from './components/Sidebar'
 import InfoCards from './components/InfoCards'
+import FeedPanel from './components/FeedPanel'
+import MailPanel from './components/MailPanel'
 import { isSpeaking } from './lib/tts'
+import { addFeedItem, initFeedSources } from './lib/feed'
+import { mailSummaryForChat } from './lib/mail'
 import { STATES, type OrbState } from './components/states'
 
 const HOME = 'https://www.google.com/webhp?igu=1'
@@ -60,7 +64,33 @@ export default function App() {
     position: 'center',
   })
   const [consoleOpen, setConsoleOpen] = useState(true)
+  const [feedOpen, setFeedOpen] = useState(false)
+  const [feedClosing, setFeedClosing] = useState(false)
   const shadowRef = useRef<HTMLDivElement>(null)
+
+  // opening is instant; closing plays the exit animation first, then unmounts
+  const toggleFeed = () => {
+    if (feedOpen && !feedClosing) setFeedClosing(true)
+    else if (!feedOpen) {
+      setFeedOpen(true)
+      setFeedClosing(false)
+    }
+  }
+
+  const [mailOpen, setMailOpen] = useState(false)
+  const [mailClosing, setMailClosing] = useState(false)
+  const toggleMail = () => {
+    if (mailOpen && !mailClosing) setMailClosing(true)
+    else if (!mailOpen) {
+      setMailOpen(true)
+      setMailClosing(false)
+    }
+  }
+
+  // live feed: news poller + server/network watchers (idempotent)
+  useEffect(() => {
+    initFeedSources()
+  }, [])
 
   // failsafe: whatever happens, the core always drifts home to breathing —
   // but never while Jarvis is still speaking (long answers keep the talking state)
@@ -90,7 +120,7 @@ export default function App() {
     }
   }, [])
 
-  const executeUICommand = (name: string, args: Record<string, unknown>): string => {
+  const executeUICommand = (name: string, args: Record<string, unknown>): string | Promise<string> => {
     switch (name) {
       case 'open_browser': {
         const url = resolveUrl(args)
@@ -112,6 +142,17 @@ export default function App() {
         if (!STATES.includes(s)) return `Unknown state ${s}`
         setState(s)
         return `Protocol state set to ${s}`
+      }
+      case 'add_note': {
+        const text = String(args.text ?? '').trim()
+        if (!text) return 'Nothing to note.'
+        addFeedItem({ kind: 'note', title: text })
+        return `Noted and saved to the feed: "${text}"`
+      }
+      case 'check_mail': {
+        setMailOpen(true)
+        setMailClosing(false)
+        return mailSummaryForChat()
       }
       default:
         return `Unknown tool ${name}`
@@ -139,10 +180,35 @@ export default function App() {
       <Sidebar
         browserOpen={browser.open}
         consoleOpen={consoleOpen}
+        feedOpen={feedOpen && !feedClosing}
+        mailOpen={mailOpen && !mailClosing}
         onToggleBrowser={() => setBrowser((b) => ({ ...b, open: !b.open }))}
         onToggleConsole={() => setConsoleOpen((v) => !v)}
+        onToggleFeed={toggleFeed}
+        onToggleMail={toggleMail}
       />
       <InfoCards />
+      {feedOpen && (
+        <FeedPanel
+          closing={feedClosing}
+          onOpenLink={(url) => setBrowser({ open: true, url, position: 'center' })}
+          onRequestClose={toggleFeed}
+          onClosed={() => {
+            setFeedOpen(false)
+            setFeedClosing(false)
+          }}
+        />
+      )}
+      {mailOpen && (
+        <MailPanel
+          closing={mailClosing}
+          onRequestClose={toggleMail}
+          onClosed={() => {
+            setMailOpen(false)
+            setMailClosing(false)
+          }}
+        />
+      )}
       {consoleOpen ? (
         <Console
           state={state}
