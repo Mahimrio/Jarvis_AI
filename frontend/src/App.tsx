@@ -200,7 +200,6 @@ export default function App() {
         <>
           <HudBar
             state={state}
-            onToggleBrowser={() => setBrowser((b) => ({ ...b, open: !b.open }))}
             onSelectState={setState}
           />
           <Sidebar

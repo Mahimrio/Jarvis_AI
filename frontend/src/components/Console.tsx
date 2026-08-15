@@ -293,9 +293,9 @@ export default function Console({ state, hidden, onRequestOpen, onOpenBrowser, o
       }
       // bare wake before the first greeting: the visibility effect greets as it opens
     },
-    onBlocked: (reason) => {
+    onBlocked: (reason, persist) => {
       setWakeOn(false)
-      setSetting('wakeOn', false)
+      if (persist) setSetting('wakeOn', false)
       setMessages((m) => [...m, { role: 'jarvis', text: reason }])
     },
   })

@@ -93,7 +93,7 @@ interface WakeOptions {
   enabled: boolean
   // command = words spoken after "jarvis" in the same breath, if any
   onWake: (command: string | null) => void
-  onBlocked?: (reason: string) => void
+  onBlocked?: (reason: string, persist: boolean) => void
 }
 
 // always-on background listener for "hey Jarvis" (Web Speech, Chrome/Edge)
@@ -103,6 +103,7 @@ export function useWakeWord({ enabled, onWake, onBlocked }: WakeOptions) {
   cbRef.current = { onWake, onBlocked }
   const lastFire = useRef(0)
   const blocked = useRef(false)
+  const netFails = useRef(0)
 
   useEffect(() => {
     if (!enabled || !speechSupported || blocked.current) return
@@ -117,6 +118,7 @@ export function useWakeWord({ enabled, onWake, onBlocked }: WakeOptions) {
       rec.continuous = true
       rec.interimResults = true
       rec.onresult = (e) => {
+        netFails.current = 0
         if (isSpeaking()) return // never let Jarvis wake himself
         if (Date.now() - lastFire.current < 1500) return
         for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -137,7 +139,15 @@ export function useWakeWord({ enabled, onWake, onBlocked }: WakeOptions) {
       rec.onerror = (e) => {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
           blocked.current = true
-          cbRef.current.onBlocked?.('Microphone access denied — wake word disabled.')
+          cbRef.current.onBlocked?.('Microphone access denied — wake word disabled.', true)
+        }
+        // Electron has no Google speech service — stop the retry loop for good
+        if (e.error === 'network' && ++netFails.current >= 3) {
+          blocked.current = true
+          cbRef.current.onBlocked?.(
+            'Speech service unavailable in the desktop shell — wake word paused (native hotword arrives with the OS-control phase).',
+            false
+          )
         }
       }
       rec.onend = () => {

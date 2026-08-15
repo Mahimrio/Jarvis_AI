@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { STATES, type OrbState } from './states'
+import { isDesktop, minimizeApp, quitApp } from '../lib/os'
 
 function useFps() {
   const [fps, setFps] = useState(60)
@@ -91,11 +92,10 @@ function useOnline() {
 
 interface Props {
   state: OrbState
-  onToggleBrowser: () => void
   onSelectState: (s: OrbState) => void
 }
 
-export default function HudBar({ state, onToggleBrowser, onSelectState }: Props) {
+export default function HudBar({ state, onSelectState }: Props) {
   const fps = useFps()
   const latency = useLatency()
   const uptime = useUptime()
@@ -184,9 +184,16 @@ export default function HudBar({ state, onToggleBrowser, onSelectState }: Props)
         </span>
       </div>
       <div className="hud-right">
-        <button type="button" className="hud-btn hud-btn-primary" onClick={onToggleBrowser}>
-          ⊕ BROWSER
-        </button>
+        {isDesktop() && (
+          <>
+            <button type="button" className="hud-btn" title="Minimize" onClick={minimizeApp}>
+              –
+            </button>
+            <button type="button" className="hud-btn" title="Quit Jarvis (Ctrl+Q)" onClick={quitApp}>
+              ✕
+            </button>
+          </>
+        )}
       </div>
     </header>
   )
