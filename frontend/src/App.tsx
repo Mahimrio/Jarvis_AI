@@ -20,6 +20,7 @@ import { addFeedItem, initFeedSources } from './lib/feed'
 import { mailSummaryForChat } from './lib/mail'
 import { getSettings } from './lib/settings'
 import { openRealBrowser, moveRealBrowser, closeRealBrowser } from './lib/realBrowser'
+import { isDesktop, osTypeText, osOpenApp, osOpenUrl, osSystemControl } from './lib/os'
 import { STATES, type OrbState } from './components/states'
 
 const HOME = 'https://www.google.com/webhp?igu=1'
@@ -145,6 +146,8 @@ export default function App() {
       case 'open_browser': {
         const url = resolveUrl(args, realChrome)
         const position = normalizeAnchor(args.position)
+        // desktop: open in the system's default browser (real Chrome)
+        if (realChrome && isDesktop()) return osOpenUrl(url)
         if (realChrome) return openRealBrowser(url, position)
         setBrowser({ open: true, url, position })
         return `Browser window opened at ${position} showing ${url}`
@@ -176,6 +179,28 @@ export default function App() {
         setPanel('mail')
         setPanelClosing(false)
         return mailSummaryForChat()
+      }
+      case 'type_text':
+        return osTypeText(String(args.text ?? ''))
+      case 'open_app':
+        return osOpenApp(String(args.name ?? ''))
+      case 'system_control':
+        return osSystemControl(String(args.action ?? ''))
+      case 'web_search': {
+        const q = String(args.query ?? '').trim()
+        if (!q) return 'Empty search query.'
+        return (async () => {
+          try {
+            const res = await fetch(`http://localhost:8765/search?q=${encodeURIComponent(q)}`)
+            if (!res.ok) return `Search unavailable (${res.status}) — is the voice server running?`
+            const data = await res.json()
+            const items = (data.results ?? []) as { title: string; url: string; snippet: string }[]
+            if (items.length === 0) return 'No results found.'
+            return items.map((r, i) => `${i + 1}. ${r.title} (${r.url})\n${r.snippet}`).join('\n\n')
+          } catch {
+            return 'Search failed — backend unreachable.'
+          }
+        })()
       }
       default:
         return `Unknown tool ${name}`

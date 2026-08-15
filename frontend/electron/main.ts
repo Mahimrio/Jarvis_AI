@@ -1,5 +1,5 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, session } from 'electron'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { app, BrowserWindow, globalShortcut, ipcMain, session, shell } from 'electron'
+import { spawn, execFile, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import http from 'node:http'
 import fs from 'node:fs'
@@ -87,6 +87,89 @@ ipcMain.handle('jarvis:autolaunch:get', () => app.getLoginItemSettings().openAtL
 ipcMain.handle('jarvis:autolaunch:set', (_e, on: boolean) => {
   app.setLoginItemSettings({ openAtLogin: on })
   return app.getLoginItemSettings().openAtLogin
+})
+
+// ---- OS control (PowerShell/system commands — no native modules) ----------
+
+function runPS(command: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', command],
+      { timeout: 15000, windowsHide: true },
+      (err) => resolve(err ? `failed: ${err.message.slice(0, 120)}` : 'ok'),
+    )
+  })
+}
+
+ipcMain.handle('jarvis:os:type', async (_e, text: string) => {
+  // SendKeys metacharacters must be wrapped in braces; single quotes doubled for PS
+  const esc = String(text).slice(0, 500).replace(/([+^%~(){}[\]])/g, '{$1}').replace(/'/g, "''")
+  const res = await runPS(
+    `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${esc}')`,
+  )
+  return res === 'ok' ? `Typed into the focused window.` : `Typing ${res}`
+})
+
+const APP_ALIASES: Record<string, string> = {
+  'vs code': 'code',
+  'visual studio code': 'code',
+  vscode: 'code',
+  calculator: 'calc',
+  'file explorer': 'explorer',
+  files: 'explorer',
+  terminal: 'wt',
+  powershell: 'powershell',
+  settings: 'ms-settings:',
+  paint: 'mspaint',
+  word: 'winword',
+  excel: 'excel',
+}
+
+ipcMain.handle('jarvis:os:open-app', (_e, name: string) => {
+  const clean = String(name).toLowerCase().trim().slice(0, 60)
+  const target = APP_ALIASES[clean] ?? clean.replace(/[^a-z0-9 ._:-]/g, '')
+  if (!target) return 'No app name given.'
+  try {
+    spawn('cmd.exe', ['/c', 'start', '', target], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+    return `Launching ${clean}.`
+  } catch (err) {
+    return `Could not launch ${clean}: ${err instanceof Error ? err.message : err}`
+  }
+})
+
+ipcMain.handle('jarvis:os:open-url', async (_e, url: string) => {
+  if (!/^https?:\/\//i.test(String(url))) return 'Only http(s) URLs allowed.'
+  await shell.openExternal(String(url))
+  return `Opened in your default browser.`
+})
+
+ipcMain.handle('jarvis:os:system', async (_e, action: string) => {
+  switch (action) {
+    case 'volume_up':
+      return (await runPS('(New-Object -ComObject WScript.Shell).SendKeys([char]175 * 4)')) === 'ok' ? 'Volume up.' : 'Volume control failed.'
+    case 'volume_down':
+      return (await runPS('(New-Object -ComObject WScript.Shell).SendKeys([char]174 * 4)')) === 'ok' ? 'Volume down.' : 'Volume control failed.'
+    case 'mute':
+      return (await runPS('(New-Object -ComObject WScript.Shell).SendKeys([char]173)')) === 'ok' ? 'Toggled mute.' : 'Mute failed.'
+    case 'lock':
+      spawn('rundll32.exe', ['user32.dll,LockWorkStation'], { windowsHide: true })
+      return 'Locking the workstation.'
+    case 'screenshot': {
+      const out = path.join(app.getPath('pictures'), `jarvis-screenshot-${Date.now()}.png`)
+      const ps = `Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Left,$b.Top,0,0,$bmp.Size); $bmp.Save('${out.replace(/\\/g, '\\\\')}')`
+      const res = await runPS(ps)
+      return res === 'ok' ? `Screenshot saved to ${out}` : `Screenshot ${res}`
+    }
+    case 'shutdown':
+      spawn('shutdown.exe', ['/s', '/t', '30'], { windowsHide: true })
+      return 'Shutting down in 30 seconds. Say "cancel shutdown" to abort.'
+    case 'cancel_shutdown':
+      spawn('shutdown.exe', ['/a'], { windowsHide: true })
+      return 'Shutdown aborted.'
+    default:
+      return `Unknown system action ${action}`
+  }
 })
 
 app.whenReady().then(() => {

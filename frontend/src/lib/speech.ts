@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { isSpeaking } from './tts'
+import { isDesktop } from './os'
+import { startNativeStt, type NativeSttSession } from './nativeStt'
 
 interface SpeechRecognitionEventLike {
   resultIndex: number
@@ -21,7 +23,8 @@ interface SpeechRecognitionLike {
 const SpeechRecognitionCtor = (window as unknown as Record<string, unknown>).SpeechRecognition ??
   (window as unknown as Record<string, unknown>).webkitSpeechRecognition
 
-export const speechSupported = typeof SpeechRecognitionCtor === 'function'
+// browser uses Web Speech; the desktop shell uses the backend's offline vosk engine
+export const speechSupported = typeof SpeechRecognitionCtor === 'function' || isDesktop()
 
 interface Options {
   onFinal: (text: string) => void
@@ -33,14 +36,59 @@ export function useSpeech({ onFinal, onEnd }: Options) {
   const [interim, setInterim] = useState('')
   const [error, setError] = useState<string | null>(null)
   const recRef = useRef<SpeechRecognitionLike | null>(null)
+  const nativeRef = useRef<NativeSttSession | null>(null)
   const hadFinal = useRef(false)
   const cbRef = useRef({ onFinal, onEnd })
   cbRef.current = { onFinal, onEnd }
 
-  useEffect(() => () => recRef.current?.abort(), [])
+  useEffect(
+    () => () => {
+      recRef.current?.abort()
+      nativeRef.current?.stop()
+    },
+    [],
+  )
+
+  const startNative = async () => {
+    setError(null)
+    hadFinal.current = false
+    setListening(true)
+    let idleTimer: number | undefined
+    const finish = () => {
+      clearTimeout(idleTimer)
+      nativeRef.current?.stop()
+      nativeRef.current = null
+      setListening(false)
+      setInterim('')
+      cbRef.current.onEnd(hadFinal.current)
+    }
+    // single-utterance semantics: stop after the first final, or 8s of silence
+    idleTimer = window.setTimeout(finish, 8000)
+    nativeRef.current = await startNativeStt({
+      onPartial: (t) => {
+        setInterim(t)
+        clearTimeout(idleTimer)
+        idleTimer = window.setTimeout(finish, 4000)
+      },
+      onFinal: (t) => {
+        hadFinal.current = true
+        cbRef.current.onFinal(t.trim())
+        finish()
+      },
+      onError: (msg) => {
+        setError(msg)
+        finish()
+      },
+    })
+  }
 
   const start = () => {
-    if (!speechSupported || listening) return
+    if (listening) return
+    if (isDesktop()) {
+      void startNative()
+      return
+    }
+    if (typeof SpeechRecognitionCtor !== 'function') return
     setError(null)
     hadFinal.current = false
     const rec = new (SpeechRecognitionCtor as new () => SpeechRecognitionLike)()
@@ -82,7 +130,16 @@ export function useSpeech({ onFinal, onEnd }: Options) {
     setListening(true)
   }
 
-  const stop = () => recRef.current?.stop()
+  const stop = () => {
+    recRef.current?.stop()
+    if (nativeRef.current) {
+      nativeRef.current.stop()
+      nativeRef.current = null
+      setListening(false)
+      setInterim('')
+      cbRef.current.onEnd(hadFinal.current)
+    }
+  }
 
   return { listening, interim, error, start, stop }
 }
@@ -96,7 +153,7 @@ interface WakeOptions {
   onBlocked?: (reason: string, persist: boolean) => void
 }
 
-// always-on background listener for "hey Jarvis" (Web Speech, Chrome/Edge)
+// always-on background listener for "hey Jarvis" (Web Speech in browser, vosk on desktop)
 export function useWakeWord({ enabled, onWake, onBlocked }: WakeOptions) {
   const recRef = useRef<SpeechRecognitionLike | null>(null)
   const cbRef = useRef({ onWake, onBlocked })
@@ -105,8 +162,45 @@ export function useWakeWord({ enabled, onWake, onBlocked }: WakeOptions) {
   const blocked = useRef(false)
   const netFails = useRef(0)
 
+  // desktop: continuous native vosk stream watching for the wake word
   useEffect(() => {
-    if (!enabled || !speechSupported || blocked.current) return
+    if (!enabled || !isDesktop() || blocked.current) return
+    let disposed = false
+    let session: NativeSttSession | null = null
+
+    const check = (text: string, isFinal: boolean) => {
+      if (isSpeaking()) return
+      if (Date.now() - lastFire.current < 1500) return
+      const m = WAKE_RE.exec(text)
+      if (!m) return
+      const trailing = (m[1] ?? '').trim()
+      if (isFinal || trailing.length === 0) {
+        lastFire.current = Date.now()
+        session?.stop()
+        cbRef.current.onWake(trailing.length > 1 ? trailing : null)
+      }
+    }
+
+    void (async () => {
+      session = await startNativeStt({
+        onPartial: (t) => check(t, false),
+        onFinal: (t) => check(t, true),
+        onError: () => {
+          // backend not up yet — effect re-runs on next enabled flip; stay quiet
+        },
+      })
+      if (disposed) session.stop()
+    })()
+
+    return () => {
+      disposed = true
+      session?.stop()
+    }
+  }, [enabled])
+
+  // browser: Chrome/Edge Web Speech
+  useEffect(() => {
+    if (!enabled || isDesktop() || typeof SpeechRecognitionCtor !== 'function' || blocked.current) return
     let disposed = false
     let rec: SpeechRecognitionLike | null = null
     let restartTimer: number | undefined
@@ -141,11 +235,11 @@ export function useWakeWord({ enabled, onWake, onBlocked }: WakeOptions) {
           blocked.current = true
           cbRef.current.onBlocked?.('Microphone access denied — wake word disabled.', true)
         }
-        // Electron has no Google speech service — stop the retry loop for good
+        // no speech service in this environment (e.g. Electron) — stop the retry loop
         if (e.error === 'network' && ++netFails.current >= 3) {
           blocked.current = true
           cbRef.current.onBlocked?.(
-            'Speech service unavailable in the desktop shell — wake word paused (native hotword arrives with the OS-control phase).',
+            'Speech service unavailable in this environment — wake word paused.',
             false
           )
         }

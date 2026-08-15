@@ -69,7 +69,7 @@ const firstReady = () => PROVIDERS.find(providerAvailable) ?? PROVIDERS[0]
 
 // route each message to the best available brain
 const FRESH_RE = /\b(latest|current|today|tonight|now|news|recent|weather|price|stock|score|happening|trend|202[4-9]|screen|see|look at|image|picture|photo|vision|screenshot|diagram)\b/i
-const ACTION_RE = /\b(open|close|move|show|hide|go to|navigate|search|play|youtube|wikipedia|portfolio|browser|window|protocol|breathing|listening|shaping|corner|top[- ]?right|top[- ]?left|bottom|note|remember|remind|mail|email|inbox)\b/i
+const ACTION_RE = /\b(open|close|move|show|hide|go to|navigate|search|play|youtube|wikipedia|portfolio|browser|window|protocol|breathing|listening|shaping|corner|top[- ]?right|top[- ]?left|bottom|note|remember|remind|mail|email|inbox|type|write|launch|start|volume|mute|unmute|lock|shutdown|screenshot|spotify|notepad|calculator)\b/i
 const HEAVY_RE = /\b(explain|analy[sz]e|why|how (do|does|to|can)|code|write|program|debug|refactor|compare|summar|plan|reason|solve|calcul|essay|story|detailed?|architect|design)\b/i
 
 export function pickProvider(text: string): Provider {
@@ -98,6 +98,11 @@ Keep replies concise (1-4 sentences unless asked for detail) and technically sha
 futuristic HUD web interface which you can control with your tools: an embedded browser window you can
 open at any corner of the screen, move, or close, and the visual protocol state of your particle core.
 When sir asks to open his portfolio, call open_browser with site "portfolio".
+On the desktop you can also type into the focused application (type_text), launch programs (open_app),
+and control the system (system_control: volume, mute, lock, screenshot, shutdown). Only call
+system_control with "shutdown" when sir explicitly and unambiguously asks to shut down.
+For questions about current events, news, prices, scores, or anything after your training data,
+call web_search and answer from the results, citing the source site names.
 CRITICAL: to perform any on-screen action you MUST call the matching tool. Never claim you opened, moved,
 searched, or closed something unless you actually called the tool to do it — do not just describe it.
 Call the tool first; a confirmation message is generated for you afterward.`
@@ -192,6 +197,65 @@ const TOOLS = [
       description:
         "Check sir's Gmail inbox. Opens the mail panel and returns the unread count plus the latest message subjects for you to summarize.",
       parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'type_text',
+      description: 'Desktop only: type text into whatever application window currently has focus.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'The text to type.' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'open_app',
+      description: 'Desktop only: launch an application by name (notepad, spotify, chrome, vs code, calculator, terminal, settings…).',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Application name.' },
+        },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'system_control',
+      description: 'Desktop only: system actions. shutdown starts a 30s countdown; cancel_shutdown aborts it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['volume_up', 'volume_down', 'mute', 'lock', 'screenshot', 'shutdown', 'cancel_shutdown'],
+          },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Live web search for current information (news, prices, scores, recent events). Returns titles, URLs and snippets to answer from.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'The search query.' },
+        },
+        required: ['query'],
+      },
     },
   },
 ]

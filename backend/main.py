@@ -1,5 +1,6 @@
 import imaplib
 import io
+import json
 import os
 import re
 import threading
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import scipy.io.wavfile
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -28,6 +29,7 @@ if _ENV_FILE.exists():
 VOICE_DIR = Path(__file__).parent / "voice"
 VOICE_MP3 = VOICE_DIR / "jarvis-clone.mp3"
 VOICE_CACHE = VOICE_DIR / "jarvis-clone.safetensors"
+VOSK_DIR = Path(__file__).parent / "models" / "vosk-small-en"
 
 app = FastAPI(title="Jarvis Voice Server")
 app.add_middleware(
@@ -41,11 +43,12 @@ app.add_middleware(
 model: TTSModel | None = None
 voice_state = None
 generate_lock = threading.Lock()
+vosk_model = None
 
 
 @app.on_event("startup")
 def load_model() -> None:
-    global model, voice_state
+    global model, voice_state, vosk_model
     model = TTSModel.load_model()
     if VOICE_CACHE.exists():
         voice_state = model.get_state_for_audio_prompt(str(VOICE_CACHE))
@@ -53,6 +56,10 @@ def load_model() -> None:
         # first run: clone the voice from the mp3, then cache for fast startups
         voice_state = model.get_state_for_audio_prompt(str(VOICE_MP3))
         export_model_state(voice_state, str(VOICE_CACHE))
+    if VOSK_DIR.exists():
+        from vosk import Model as VoskModel
+
+        vosk_model = VoskModel(str(VOSK_DIR))
 
 
 class TTSRequest(BaseModel):
@@ -72,6 +79,7 @@ def health():
         "status": "online",
         "voice": "jarvis-clone",
         "model_loaded": model is not None,
+        "stt": vosk_model is not None,
         "sample_rate": model.sample_rate if model else None,
     }
 
@@ -111,6 +119,59 @@ def tts_stream(req: TTSRequest):
         media_type="application/octet-stream",
         headers={"X-Sample-Rate": str(model.sample_rate)},
     )
+
+
+@app.websocket("/stt/ws")
+async def stt_ws(ws: WebSocket):
+    """Streaming speech-to-text: client sends 16kHz mono 16-bit PCM chunks,
+    server answers with partial/final transcripts (offline vosk)."""
+    await ws.accept()
+    if vosk_model is None:
+        await ws.close(code=1011)
+        return
+    from vosk import KaldiRecognizer
+
+    rec = KaldiRecognizer(vosk_model, 16000)
+    try:
+        while True:
+            data = await ws.receive_bytes()
+            if rec.AcceptWaveform(data):
+                text = json.loads(rec.Result()).get("text", "")
+                if text:
+                    await ws.send_json({"type": "final", "text": text})
+            else:
+                partial = json.loads(rec.PartialResult()).get("partial", "")
+                if partial:
+                    await ws.send_json({"type": "partial", "text": partial})
+    except WebSocketDisconnect:
+        pass
+
+
+@app.get("/search")
+def web_search(q: str, max_results: int = 5):
+    """Keyless live web search (DuckDuckGo) with one retry for transient throttles."""
+    q = q.strip()[:200]
+    if not q:
+        raise HTTPException(status_code=400, detail="Empty query")
+    from ddgs import DDGS
+
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            results = DDGS().text(q, max_results=min(max_results, 8))
+            return {
+                "results": [
+                    {"title": r.get("title", ""), "url": r.get("href", ""), "snippet": r.get("body", "")[:300]}
+                    for r in results
+                ]
+            }
+        except Exception as exc:  # network/rate-limit — retry once, then report
+            last_exc = exc
+            if attempt == 0:
+                import time
+
+                time.sleep(1.5)
+    raise HTTPException(status_code=502, detail=f"Search failed: {last_exc}")
 
 
 # ---- Gmail via IMAP (read-only, app password from backend/.env) ----------

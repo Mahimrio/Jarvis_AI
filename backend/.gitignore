@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+models/
 
 # regenerated from the mp3 on first boot
 voice/*.safetensors
